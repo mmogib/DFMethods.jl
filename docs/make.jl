@@ -9,15 +9,20 @@ makedocs(;
     sitename="DFMethods.jl",
     format=Documenter.HTML(;
         canonical="https://mmogib.github.io/DFMethods.jl",
-        edit_link="master",
+        edit_link="main",
         assets=String[],
     ),
     pages=[
-        "Home" => "index.md",
+        "Home"            => "index.md",
+        "Quickstart"      => "quickstart.md",
+        "Algorithm"       => "algorithm.md",
+        "Constraint Sets" => "constraints.md",
+        "Extending"       => "extending.md",
+        "API Reference"   => "api.md",
     ],
 )
 
 deploydocs(;
     repo="github.com/mmogib/DFMethods.jl",
-    devbranch="master",
+    devbranch="main",
 )
