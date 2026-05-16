@@ -1,0 +1,13 @@
+name = "DFMethods"
+uuid = "5fd0b45f-fdf3-4567-a8b1-5e033765ff5d"
+authors = ["Mohammed Alshahrani <mshahrani@kfupm.edu.sa>"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
