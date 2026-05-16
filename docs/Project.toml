@@ -1,3 +1,5 @@
 [deps]
+CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
 DFMethods = "5fd0b45f-fdf3-4567-a8b1-5e033765ff5d"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"

@@ -81,14 +81,6 @@ isapprox(x0, x0_feas; atol = 1e-10) || @warn "x0 was infeasible; projected onto 
 
 ## API
 
-```@docs
-AbstractConstraintSet
-RealSpace
-BoxSet
-HalfSpace
-Intersection
-CappedBox
-UserSet
-project!
-project
-```
+Full reference for the types and functions discussed on this page lives in [API Reference](@ref):
+
+[`AbstractConstraintSet`](@ref), [`RealSpace`](@ref), [`BoxSet`](@ref), [`HalfSpace`](@ref), [`Intersection`](@ref), [`CappedBox`](@ref), [`UserSet`](@ref), [`project!`](@ref), [`project`](@ref).

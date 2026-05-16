@@ -23,6 +23,21 @@ All concrete rules carry the scalars `σ` (Armijo coefficient) and `ρ`
 """
 abstract type AbstractDFLineSearch end
 
+"""
+    gamma_k(rule::AbstractDFLineSearch, ψ_z::AbstractVector) -> Float64
+
+Per-iteration line-search multiplier ``\\gamma_k`` entering the unified
+descent condition (Ibrahim 2026 eq. 7)
+
+```math
+-\\psi(w_k + \\alpha_k d_k)^\\top d_k \\;\\geq\\; \\sigma\\, \\alpha_k\\, \\gamma_k\\, \\|d_k\\|^2.
+```
+
+Each concrete [`AbstractDFLineSearch`](@ref) subtype (`LSI`–`LSVII`)
+supplies its own formula; see the individual line-search docstrings.
+"""
+function gamma_k end
+
 # ============================================================================
 # LSI — γ_k ≡ 1 (plain Armijo-style)
 # ============================================================================

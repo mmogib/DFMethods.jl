@@ -14,6 +14,18 @@ the set into `y` and returns `y`.
 """
 abstract type AbstractConstraintSet end
 
+"""
+    project!(y::AbstractVector, x::AbstractVector, set::AbstractConstraintSet) -> y
+
+In-place orthogonal projection of `x` onto `set`. Writes the projection
+into `y` and returns `y`. Each concrete [`AbstractConstraintSet`](@ref)
+subtype provides its own method; see the individual set docstrings for
+the projection formula or algorithm used.
+
+For an allocating wrapper, see [`project`](@ref).
+"""
+function project! end
+
 # ============================================================================
 # RealSpace: no constraint (projection is identity)
 # ============================================================================

@@ -1,5 +1,7 @@
 using DFMethods
 using Documenter
+using CommonSolve
+using SciMLBase
 
 DocMeta.setdocmeta!(DFMethods, :DocTestSetup, :(using DFMethods); recursive=true)
 

@@ -24,6 +24,35 @@ The `Symbol` is the `retcode` (`:Success`, `:Stalled`, `:MaxIters`,
 """
 abstract type AbstractStoppingCriterion end
 
+"""
+    should_stop_at_w(crit, cache) -> (Bool, Symbol)
+
+Check whether the criterion fires immediately after evaluating
+``\\psi(w_k)`` (right after the inertial extrapolation). Returns a
+`(stopped, retcode)` tuple. The default for `AbstractStoppingCriterion`
+is `(false, :Default)`; concrete criteria override only the dispatch
+points they care about.
+"""
+function should_stop_at_w end
+
+"""
+    should_stop_at_z(crit, cache) -> (Bool, Symbol)
+
+Check whether the criterion fires after evaluating ``\\psi(z_k)`` at the
+trial point ``z_k = w_k + \\alpha_k d_k`` (post line search). A `:Success`
+here is only accepted by the algorithm if ``z_k \\in X``.
+"""
+function should_stop_at_z end
+
+"""
+    should_stop_at_end(crit, cache) -> (Bool, Symbol)
+
+Check whether the criterion fires after the projection step has produced
+``x_{k+1}`` (end of iteration). Suitable for iteration-count (`MaxIters`),
+wall-clock (`MaxTime`), and step-norm (`StepNormTol`) criteria.
+"""
+function should_stop_at_end end
+
 # Default fall-throughs — concrete criteria override the points they care about.
 should_stop_at_w(::AbstractStoppingCriterion, cache)   = (false, :Default)
 should_stop_at_z(::AbstractStoppingCriterion, cache)   = (false, :Default)

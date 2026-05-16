@@ -27,6 +27,15 @@ init_cache
 step!
 ```
 
+## SciML integration
+
+```@docs
+DFMethods.DFSciMLCache
+CommonSolve.init(::SciMLBase.NonlinearProblem, ::DFProjection)
+CommonSolve.step!(::DFMethods.DFSciMLCache)
+CommonSolve.solve!(::DFMethods.DFSciMLCache)
+```
+
 ## Assumption traits
 
 ```@docs
