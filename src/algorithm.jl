@@ -3,15 +3,15 @@
 # Implements Algorithm 1 (UIDFPAF) of Ibrahim, Alshahrani, Al-Homidan (JOTA 2026).
 # One outer iteration:
 #   1. Inertial:        w_k = x_k + θ_k (x_k - x_{k-1})
-#   2. Eval:            ψ_w = ψ(w_k); early-stop if ‖ψ_w‖ ≤ ε
+#   2. Eval:            F_w = F(w_k); early-stop if ‖F_w‖ ≤ ε
 #   3. Direction:       d_k = direction!(...)
 #   4. Backtracking LS: α_k via the seven LS variants
-#   5. Trial:           z_k = w_k + α_k d_k;  ψ_z = ψ(z_k)
-#                       early-stop if ‖ψ_z‖ ≤ ε AND z_k ∈ X
-#   6. Hyperplane:      H_k = {x : ψ_z' (x - z_k) ≤ 0}
-#                       λ_k = ψ_z' (w_k - z_k) / ‖ψ_z‖²
-#                       ε_k = (ζ²/2) ‖λ_k ψ_z‖²
-#   7. Projection:      x_{k+1} = approx_project(X ∩ H_k, w_k - λ_k ψ_z, ε_k)
+#   5. Trial:           z_k = w_k + α_k d_k;  F_z = F(z_k)
+#                       early-stop if ‖F_z‖ ≤ ε AND z_k ∈ X
+#   6. Hyperplane:      H_k = {x : F_z' (x - z_k) ≤ 0}
+#                       λ_k = F_z' (w_k - z_k) / ‖F_z‖²
+#                       ε_k = (ζ²/2) ‖λ_k F_z‖²
+#   7. Projection:      x_{k+1} = approx_project(X ∩ H_k, w_k - λ_k F_z, ε_k)
 
 # ============================================================================
 # DFProjection: concrete algorithm
@@ -94,16 +94,16 @@ per-iteration buffers are pre-allocated; `step!` does not allocate.
 
 State fields:
 - `x`, `x_prev`, `w`, `w_prev`, `z`, `d`, `d_prev` — iteration vectors.
-- `ψw`, `ψw_prev`, `ψz` — function values.
+- `Fw`, `Fw_prev`, `Fz` — function values.
 - `x_new`, `proj_target` — buffers for the projection step.
 - `proj_p`, `proj_q`, `proj_scratch`, `proj_out_prev` — Dykstra inner buffers.
 - `k::Int` — iteration counter (0-based).
-- `n_evals::Int` — total ψ evaluations.
+- `n_evals::Int` — total F evaluations.
 - `converged::Bool` — true on successful early-stop.
 - `done::Bool` — true once the driver should exit the loop.
 - `retcode::Symbol` — `:Default`, `:Success`, `:MaxIters`, `:LineSearchFailed`,
   `:DegenerateResidual`.
-- `resid::Float64` — final ‖ψ‖ at the returned iterate (`NaN` until set).
+- `resid::Float64` — final ‖F‖ at the returned iterate (`NaN` until set).
 """
 mutable struct DFProjectionCache{Alg<:DFProjection, F}
     alg::Alg
@@ -117,9 +117,9 @@ mutable struct DFProjectionCache{Alg<:DFProjection, F}
     z::Vector{Float64}
     d::Vector{Float64}
     d_prev::Vector{Float64}
-    ψw::Vector{Float64}
-    ψw_prev::Vector{Float64}
-    ψz::Vector{Float64}
+    Fw::Vector{Float64}
+    Fw_prev::Vector{Float64}
+    Fz::Vector{Float64}
     x_new::Vector{Float64}
     proj_target::Vector{Float64}
 
@@ -141,7 +141,7 @@ mutable struct DFProjectionCache{Alg<:DFProjection, F}
     resid::Float64
 
     # Stopping-criterion state
-    ψ0_norm::Float64        # ‖ψ(x_0)‖, set by `init_cache` (for RelResidualTol)
+    F0_norm::Float64        # ‖F(x_0)‖, set by `init_cache` (for RelResidualTol)
     t_start::Float64        # wall-clock seconds at solve start (for MaxTime)
 
     # Previous line-search step size α_{k-1}. Surfaced to `direction!` via
@@ -161,7 +161,7 @@ end
 
 Allocate per-solve buffers and prepare the initial state. Projects
 `x0` onto `alg.set` to ensure feasibility (paper assumes `x_0 ∈ X`).
-Evaluates `ψ` once at the projected `x_0` to populate `ψ0_norm`
+Evaluates `F` once at the projected `x_0` to populate `F0_norm`
 (used by `RelResidualTol`) and starts the wall-clock for `MaxTime`.
 """
 function init_cache(F, x0::AbstractVector, alg::DFProjection)
@@ -176,9 +176,9 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     z       = similar(x)
     d       = zeros(n)
     d_prev  = zeros(n)
-    ψw      = zeros(n)
-    ψw_prev = zeros(n)
-    ψz      = zeros(n)
+    Fw      = zeros(n)
+    Fw_prev = zeros(n)
+    Fz      = zeros(n)
     x_new   = similar(x)
     proj_target   = similar(x)
     proj_p        = zeros(n)
@@ -187,28 +187,28 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     proj_out_prev = similar(x)
     scratch1      = similar(x)
 
-    # One initial ψ-eval for ψ0_norm (used by `RelResidualTol`).
-    ψx0 = F(x)
+    # One initial F-eval for F0_norm (used by `RelResidualTol`).
+    Fx0 = F(x)
     s = 0.0
-    @inbounds for i in eachindex(ψx0)
-        s += ψx0[i] * ψx0[i]
+    @inbounds for i in eachindex(Fx0)
+        s += Fx0[i] * Fx0[i]
     end
-    ψ0_norm = sqrt(s)
+    F0_norm = sqrt(s)
 
     return DFProjectionCache(
         alg, F,
         x, x_prev, w, w_prev, z, d, d_prev,
-        ψw, ψw_prev, ψz,
+        Fw, Fw_prev, Fz,
         x_new, proj_target,
         proj_p, proj_q, proj_scratch, proj_out_prev,
         scratch1,
         0,         # k
-        1,         # n_evals (the ψ(x_0) eval just done)
+        1,         # n_evals (the F(x_0) eval just done)
         false,     # converged
         false,     # done
         :Default,  # retcode
         NaN,       # resid
-        ψ0_norm,   # ψ0_norm
+        F0_norm,   # F0_norm
         time(),    # t_start
         1.0,       # α_prev (ignored at k=0; first line search overwrites)
     )
@@ -258,18 +258,18 @@ function step!(cache::DFProjectionCache)
     # ── Step 1: inertial point w_k = x_k + θ_k (x_k - x_{k-1}) ───────────────
     apply_inertial!(cache.w, alg.inertial, k, cache.x, cache.x_prev)
 
-    # ── Step 2: ψ(w_k) ────────────────────────────────────────────────────────
-    ψw_value = F(cache.w)
-    @inbounds @simd for i in eachindex(cache.ψw)
-        cache.ψw[i] = ψw_value[i]
+    # ── Step 2: F(w_k) ────────────────────────────────────────────────────────
+    Fw_value = F(cache.w)
+    @inbounds @simd for i in eachindex(cache.Fw)
+        cache.Fw[i] = Fw_value[i]
     end
     cache.n_evals += 1
 
-    # ── Step 3: stopping criteria after ψ(w_k) ───────────────────────────────
+    # ── Step 3: stopping criteria after F(w_k) ───────────────────────────────
     stopped, code = should_stop_at_w(alg.stopping, cache)
     if stopped
         copyto!(cache.x, cache.w)
-        cache.resid     = _norm2(cache.ψw)
+        cache.resid     = _norm2(cache.Fw)
         cache.converged = (code === :Success)
         cache.retcode   = code
         cache.done      = true
@@ -280,8 +280,8 @@ function step!(cache::DFProjectionCache)
     # Build a per-iteration context NamedTuple. Zero-allocation in practice
     # (stack-allocated). Direction rules pull whichever fields they need.
     ctx = (;
-        ψw      = cache.ψw,
-        ψw_prev = cache.ψw_prev,
+        Fw      = cache.Fw,
+        Fw_prev = cache.Fw_prev,
         w       = cache.w,
         w_prev  = cache.w_prev,
         d_prev  = cache.d_prev,
@@ -290,27 +290,27 @@ function step!(cache::DFProjectionCache)
     )
     direction!(cache.d, alg.direction, ctx)
 
-    # ── Step 5: backtracking line search → α_k, z_k, ψ(z_k) ──────────────────
+    # ── Step 5: backtracking line search → α_k, z_k, F(z_k) ──────────────────
     α, _, n_evals_ls, ok = linesearch!(alg.linesearch, F,
                                        cache.w, cache.d,
-                                       cache.z, cache.ψz;
+                                       cache.z, cache.Fz;
                                        maxbt = alg.maxbt)
     cache.n_evals += n_evals_ls
 
     if !ok
         # Line search failed — report best-effort residual at w_k
-        cache.resid   = _norm2(cache.ψw)
+        cache.resid   = _norm2(cache.Fw)
         cache.retcode = :LineSearchFailed
         cache.done    = true
         return cache
     end
 
-    # ── Step 6: stopping criteria after ψ(z_k) (z_k ∈ X required for Success) ──
+    # ── Step 6: stopping criteria after F(z_k) (z_k ∈ X required for Success) ──
     stopped, code = should_stop_at_z(alg.stopping, cache)
     if stopped
         if _is_feasible(cache.z, alg.set, cache.scratch1)
             copyto!(cache.x, cache.z)
-            cache.resid     = _norm2(cache.ψz)
+            cache.resid     = _norm2(cache.Fz)
             cache.converged = (code === :Success)
             cache.retcode   = code
             cache.done      = true
@@ -318,39 +318,39 @@ function step!(cache::DFProjectionCache)
         end
     end
 
-    # Degeneracy guard: λ_k = ψz'(w-z) / ‖ψz‖² needs ‖ψz‖ > 0.
-    ψz_norm = _norm2(cache.ψz)
-    if ψz_norm < eps()
-        cache.resid   = ψz_norm
+    # Degeneracy guard: λ_k = Fz'(w-z) / ‖Fz‖² needs ‖Fz‖ > 0.
+    Fz_norm = _norm2(cache.Fz)
+    if Fz_norm < eps()
+        cache.resid   = Fz_norm
         cache.retcode = :DegenerateResidual
         cache.done    = true
         return cache
     end
 
     # ── Step 7: hyperplane H_k and approximate projection ─────────────────────
-    # H_k = {x : ψz' (x - z_k) ≤ 0}  →  a = ψz, c = ψz' z_k
-    # λ_k = ψz'(w_k - z_k) / ‖ψz‖²
+    # H_k = {x : Fz' (x - z_k) ≤ 0}  →  a = Fz, c = Fz' z_k
+    # λ_k = Fz'(w_k - z_k) / ‖Fz‖²
     inner_wz   = 0.0
-    inner_ψz_z = 0.0
-    ψz_norm_sq = ψz_norm * ψz_norm
+    inner_Fz_z = 0.0
+    Fz_norm_sq = Fz_norm * Fz_norm
     @inbounds for i in eachindex(cache.w)
-        inner_wz   += cache.ψz[i] * (cache.w[i] - cache.z[i])
-        inner_ψz_z += cache.ψz[i] * cache.z[i]
+        inner_wz   += cache.Fz[i] * (cache.w[i] - cache.z[i])
+        inner_Fz_z += cache.Fz[i] * cache.z[i]
     end
-    λ = inner_wz / ψz_norm_sq
+    λ = inner_wz / Fz_norm_sq
 
-    # target = w_k - λ ψz
+    # target = w_k - λ Fz
     @inbounds @simd for i in eachindex(cache.w)
-        cache.proj_target[i] = cache.w[i] - λ * cache.ψz[i]
+        cache.proj_target[i] = cache.w[i] - λ * cache.Fz[i]
     end
 
-    # ε_k = (ζ²/2) ‖λ ψz‖² = (ζ²/2) λ² ‖ψz‖²
-    ε_k = 0.5 * alg.ζ^2 * λ * λ * ψz_norm_sq
+    # ε_k = (ζ²/2) ‖λ Fz‖² = (ζ²/2) λ² ‖Fz‖²
+    ε_k = 0.5 * alg.ζ^2 * λ * λ * Fz_norm_sq
 
     # Project onto X ∩ H_k
     approx_project_X_halfspace!(cache.x_new, cache.proj_target,
                                 alg.set,
-                                cache.ψz, inner_ψz_z, ε_k,
+                                cache.Fz, inner_Fz_z, ε_k,
                                 cache.proj_p, cache.proj_q,
                                 cache.proj_scratch, cache.proj_out_prev;
                                 maxiter = alg.inner_maxiter)
@@ -359,7 +359,7 @@ function step!(cache::DFProjectionCache)
     copyto!(cache.x_prev,    cache.x)
     copyto!(cache.x,         cache.x_new)
     copyto!(cache.w_prev,    cache.w)
-    copyto!(cache.ψw_prev,   cache.ψw)
+    copyto!(cache.Fw_prev,   cache.Fw)
     copyto!(cache.d_prev,    cache.d)
     cache.α_prev = α
 
@@ -372,7 +372,7 @@ function step!(cache::DFProjectionCache)
         cache.retcode   = code
         cache.done      = true
         # resid is left as NaN for end-of-iter stops; the driver
-        # finalizes it with a single ψ(x_final) call after the loop.
+        # finalizes it with a single F(x_final) call after the loop.
     end
 
     return cache

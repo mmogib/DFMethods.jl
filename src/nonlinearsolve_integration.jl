@@ -25,7 +25,7 @@ using CommonSolve
 # Captures `prob.p` and (in the in-place case) a reusable internal buffer.
 #
 # The in-place form returns a *copy* of the internal buffer each call so
-# downstream callers can hold the result across non-consecutive ψ-calls.
+# downstream callers can hold the result across non-consecutive F-calls.
 # A polish item is threading an in-place `F!(out, x)` all the way through
 # the inner cache to eliminate the copy.
 function _wrap_problem_F(prob::SciMLBase.NonlinearProblem)

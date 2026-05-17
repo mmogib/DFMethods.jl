@@ -14,12 +14,12 @@ Pre-v0.2 work in progress — see project notes for scope.
 First public release. Implements **UIDFPAF** (Unified Inertial Derivative-Free
 Projection Algorithmic Framework) of Ibrahim, Alshahrani, Al-Homidan
 (*Journal of Optimization Theory and Applications* **208**:11, 2026)
-for constrained nonlinear equations ψ(x) = 0 on a closed convex set X.
+for constrained nonlinear equations F(x) = 0 on a closed convex set X.
 
 ### Added
 - `DFProjection` algorithm with pluggable components:
   - **Search direction**: `AbstractSearchDirection`, with `SpectralThreeTerm` (paper default) and the `direction!(d, rule, ctx)` user-extension API.
-  - **Line search**: `AbstractDFLineSearch`, with `LSI`–`LSVII` (seven variants from the paper) and the `gamma_k(rule, ψ_z)` user-extension API.
+  - **Line search**: `AbstractDFLineSearch`, with `LSI`–`LSVII` (seven variants from the paper) and the `gamma_k(rule, F_z)` user-extension API.
   - **Inertial rule**: `AbstractInertialRule`, with `Inertial(θ)` and `NoInertial()`.
   - **Constraint set**: `AbstractConstraintSet`, with `RealSpace`, `BoxSet`, `HalfSpace`, `CappedBox`, `Intersection` (Dykstra), `UserSet`.
   - **Stopping criteria**: `AbstractStoppingCriterion`, with `AbsResidualTol`, `RelResidualTol`, `StepNormTol`, `DirectionNormTol`, `MaxIters`, `MaxTime`, `MaxFEvals`, `UserStop`, and the `AnyOf` composite.

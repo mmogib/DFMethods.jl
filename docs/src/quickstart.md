@@ -11,7 +11,7 @@ DFMethods plugs into NonlinearSolve.jl's standard solve interface. After `using 
 ```julia
 using NonlinearSolve, DFMethods
 
-# ψ : R^n → R^n  (out-of-place — returns a new vector)
+# F : R^n → R^n  (out-of-place — returns a new vector)
 F(u, p) = u .- sin.(u)
 
 n  = 1000
@@ -23,8 +23,8 @@ sol = solve(prob, alg)
 
 sol.u             # final iterate
 sol.retcode       # ReturnCode.Success / MaxIters / Stalled
-sol.resid         # final ψ(x*)
-sol.stats.nf      # ψ evaluations
+sol.resid         # final F(x*)
+sol.stats.nf      # F evaluations
 sol.stats.nsteps  # outer iterations
 ```
 
@@ -78,7 +78,7 @@ sol = solve(prob, DFProjection(); abstol = 1e-10, maxiters = 5000)
 ```julia
 alg = DFProjection(;
     direction  = SpectralThreeTerm(; r = 0.05),       # spectral parameter
-    linesearch = LSV(; σ = 0.001, ρ = 0.5), # γ_k = min(1, ‖ψ‖)
+    linesearch = LSV(; σ = 0.001, ρ = 0.5), # γ_k = min(1, ‖F‖)
     inertial   = NoInertial(),              # disable inertia
 )
 ```

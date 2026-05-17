@@ -55,7 +55,7 @@ Pkg.add(url = "https://github.com/mmogib/DFMethods.jl")
 ```julia
 using NonlinearSolve, DFMethods
 
-# ψ : R^n → R^n  (out-of-place; in-place f!(du, u, p) also supported)
+# F : R^n → R^n  (out-of-place; in-place f!(du, u, p) also supported)
 F(u, p) = u .- p
 
 # NonlinearProblem with target p = [0.3, -0.2]
@@ -67,7 +67,7 @@ alg = DFProjection(; set = BoxSet([-1.0, -1.0], [1.0, 1.0]))
 sol = solve(prob, alg)
 sol.u             # ≈ [0.3, -0.2]
 sol.retcode       # ReturnCode.Success
-sol.stats.nf      # number of ψ evaluations
+sol.stats.nf      # number of F evaluations
 sol.stats.nsteps  # outer iterations
 ```
 

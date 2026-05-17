@@ -4,9 +4,9 @@
 # defines a per-iteration multiplier γ_k such that the smallest i ≥ 0
 # with α_k = ρ^i is accepted when
 #
-#     -ψ(w_k + α_k d_k)' d_k  ≥  σ · α_k · γ_k · ‖d_k‖²
+#     -F(w_k + α_k d_k)' d_k  ≥  σ · α_k · γ_k · ‖d_k‖²
 #
-# γ_k depends on ψ at the trial point z = w_k + α_k d_k.
+# γ_k depends on F at the trial point z = w_k + α_k d_k.
 #
 # Notation: the paper calls the backtracking factor `γ`; we use `ρ` here
 # (standard optimization notation) to avoid colliding with `γ_k`.
@@ -15,7 +15,7 @@
     AbstractDFLineSearch
 
 Supertype for derivative-free line-search rules. Each subtype defines
-the multiplier `gamma_k(rule, ψ_z)` entering the unified descent
+the multiplier `gamma_k(rule, F_z)` entering the unified descent
 condition.
 
 All concrete rules carry the scalars `σ` (Armijo coefficient) and `ρ`
@@ -24,7 +24,7 @@ All concrete rules carry the scalars `σ` (Armijo coefficient) and `ρ`
 abstract type AbstractDFLineSearch end
 
 """
-    gamma_k(rule::AbstractDFLineSearch, ψ_z::AbstractVector) -> Float64
+    gamma_k(rule::AbstractDFLineSearch, F_z::AbstractVector) -> Float64
 
 Per-iteration line-search multiplier ``\\gamma_k`` entering the unified
 descent condition (Ibrahim 2026 eq. 7)
@@ -52,16 +52,16 @@ Base.@kwdef struct LSI <: AbstractDFLineSearch
     ρ::Float64 = 0.6
 end
 
-gamma_k(::LSI, ψ_z::AbstractVector) = 1.0
+gamma_k(::LSI, F_z::AbstractVector) = 1.0
 
 # ============================================================================
-# LSII — γ_k = ‖ψ(z_k)‖
+# LSII — γ_k = ‖F(z_k)‖
 # ============================================================================
 
 """
     LSII(; σ=0.01, ρ=0.6)
 
-`γ_k = ‖ψ(z_k)‖`. Scales the descent test with the residual at the
+`γ_k = ‖F(z_k)‖`. Scales the descent test with the residual at the
 trial point.
 """
 Base.@kwdef struct LSII <: AbstractDFLineSearch
@@ -69,35 +69,35 @@ Base.@kwdef struct LSII <: AbstractDFLineSearch
     ρ::Float64 = 0.6
 end
 
-gamma_k(::LSII, ψ_z::AbstractVector) = norm(ψ_z)
+gamma_k(::LSII, F_z::AbstractVector) = norm(F_z)
 
 # ============================================================================
-# LSIII — γ_k = γ_{k1} = ‖ψ‖ / (1 + ‖ψ‖)  (bounded in (0, 1))
+# LSIII — γ_k = γ_{k1} = ‖F‖ / (1 + ‖F‖)  (bounded in (0, 1))
 # ============================================================================
 
 """
     LSIII(; σ=0.01, ρ=0.6)
 
-`γ_k = ‖ψ(z_k)‖ / (1 + ‖ψ(z_k)‖)`. Saturates at 1 for large residuals.
+`γ_k = ‖F(z_k)‖ / (1 + ‖F(z_k)‖)`. Saturates at 1 for large residuals.
 """
 Base.@kwdef struct LSIII <: AbstractDFLineSearch
     σ::Float64 = 0.01
     ρ::Float64 = 0.6
 end
 
-function gamma_k(::LSIII, ψ_z::AbstractVector)
-    n = norm(ψ_z)
+function gamma_k(::LSIII, F_z::AbstractVector)
+    n = norm(F_z)
     return n / (1.0 + n)
 end
 
 # ============================================================================
-# LSIV — γ_k = γ_{k2} = τ + (1-τ) ‖ψ‖,  τ ∈ (0, 1]
+# LSIV — γ_k = γ_{k2} = τ + (1-τ) ‖F‖,  τ ∈ (0, 1]
 # ============================================================================
 
 """
     LSIV(; σ=0.01, ρ=0.6, τ=0.5)
 
-`γ_k = τ + (1-τ) · ‖ψ(z_k)‖`. Paper allows `τ ∈ [τ_min, τ_max] ⊆ (0, 1]`
+`γ_k = τ + (1-τ) · ‖F(z_k)‖`. Paper allows `τ ∈ [τ_min, τ_max] ⊆ (0, 1]`
 to vary across iterations; Phase 1 uses a fixed `τ`.
 """
 Base.@kwdef struct LSIV <: AbstractDFLineSearch
@@ -106,34 +106,34 @@ Base.@kwdef struct LSIV <: AbstractDFLineSearch
     τ::Float64 = 0.5
 end
 
-function gamma_k(rule::LSIV, ψ_z::AbstractVector)
-    return rule.τ + (1.0 - rule.τ) * norm(ψ_z)
+function gamma_k(rule::LSIV, F_z::AbstractVector)
+    return rule.τ + (1.0 - rule.τ) * norm(F_z)
 end
 
 # ============================================================================
-# LSV — γ_k = γ_{k3} = min(1, ‖ψ‖)
+# LSV — γ_k = γ_{k3} = min(1, ‖F‖)
 # ============================================================================
 
 """
     LSV(; σ=0.01, ρ=0.6)
 
-`γ_k = min(1, ‖ψ(z_k)‖)`. Caps large residuals at 1.
+`γ_k = min(1, ‖F(z_k)‖)`. Caps large residuals at 1.
 """
 Base.@kwdef struct LSV <: AbstractDFLineSearch
     σ::Float64 = 0.01
     ρ::Float64 = 0.6
 end
 
-gamma_k(::LSV, ψ_z::AbstractVector) = min(1.0, norm(ψ_z))
+gamma_k(::LSV, F_z::AbstractVector) = min(1.0, norm(F_z))
 
 # ============================================================================
-# LSVI — γ_k = γ_{k4} = clamp(‖ψ‖, lo, hi),  0 < lo ≪ hi
+# LSVI — γ_k = γ_{k4} = clamp(‖F‖, lo, hi),  0 < lo ≪ hi
 # ============================================================================
 
 """
     LSVI(; σ=0.01, ρ=0.6, lo=1e-4, hi=10.0)
 
-`γ_k = clamp(‖ψ(z_k)‖, lo, hi)`. Paper's projection onto
+`γ_k = clamp(‖F(z_k)‖, lo, hi)`. Paper's projection onto
 ``[\\bar{α}, α]``. `lo` plays the role of ``\\bar{α}``, `hi` the role of
 ``α`` in eq. (vi).
 """
@@ -144,8 +144,8 @@ Base.@kwdef struct LSVI <: AbstractDFLineSearch
     hi::Float64 = 10.0
 end
 
-function gamma_k(rule::LSVI, ψ_z::AbstractVector)
-    return clamp(norm(ψ_z), rule.lo, rule.hi)
+function gamma_k(rule::LSVI, F_z::AbstractVector)
+    return clamp(norm(F_z), rule.lo, rule.hi)
 end
 
 # ============================================================================
@@ -162,7 +162,7 @@ Adaptive variant of LSVI with shrinking upper bound `Δ`:
 - For `k ≥ 4`: `Δ ← min(α_k, Δ) / 4` before forming `hi = lo + Δ`.
 
 This rule carries state across iterations. Phase 1 exposes the
-parameter struct and a `gamma_k(rule, ψ_z; Δ)` keyword form that the
+parameter struct and a `gamma_k(rule, F_z; Δ)` keyword form that the
 Phase 2 cache will drive.
 """
 Base.@kwdef struct LSVII <: AbstractDFLineSearch
@@ -172,8 +172,8 @@ Base.@kwdef struct LSVII <: AbstractDFLineSearch
     Δ_init::Float64 = 1.0
 end
 
-function gamma_k(rule::LSVII, ψ_z::AbstractVector; Δ::Float64 = rule.Δ_init)
-    return clamp(norm(ψ_z), rule.lo, rule.lo + Δ)
+function gamma_k(rule::LSVII, F_z::AbstractVector; Δ::Float64 = rule.Δ_init)
+    return clamp(norm(F_z), rule.lo, rule.lo + Δ)
 end
 
 # ============================================================================
@@ -181,13 +181,13 @@ end
 # ============================================================================
 
 """
-    linesearch!(rule, ψ, w, d, z_buf, ψz_buf; maxbt=50)
-        -> (α::Float64, ψ_z::AbstractVector, n_evals::Int, ok::Bool)
+    linesearch!(rule, F, w, d, z_buf, Fz_buf; maxbt=50)
+        -> (α::Float64, F_z::AbstractVector, n_evals::Int, ok::Bool)
 
 Backtracking driver satisfying eq. (7):
 
 ```
--ψ(w + α d)' d  ≥  σ · α · γ_k · ‖d‖²
+-F(w + α d)' d  ≥  σ · α · γ_k · ‖d‖²
 ```
 
 Tries `α = ρ^i` for `i = 0, 1, …, maxbt`, returning the first `α`
@@ -197,23 +197,23 @@ retry with a different direction or flag a failure).
 
 # Arguments
 - `rule`: an `AbstractDFLineSearch`.
-- `ψ`: function `ψ(x) -> Vector`. Out-of-place for Phase 1; Phase 3
+- `F`: function `F(x) -> Vector`. Out-of-place for Phase 1; Phase 3
   will route through `NonlinearProblem` and support in-place.
 - `w`, `d`: current iterate `w_k` and direction `d_k`.
-- `z_buf`, `ψz_buf`: pre-allocated buffers for `w + α d` and `ψ(z)`.
+- `z_buf`, `Fz_buf`: pre-allocated buffers for `w + α d` and `F(z)`.
 
 # Returns
 - `α`: accepted step size.
-- `ψ_z`: `ψ` at the accepted trial point (`ψz_buf` after the final call).
-- `n_evals`: number of `ψ` evaluations (one per backtrack attempt).
+- `F_z`: `F` at the accepted trial point (`Fz_buf` after the final call).
+- `n_evals`: number of `F` evaluations (one per backtrack attempt).
 - `ok`: whether the inequality was satisfied within `maxbt` backtracks.
 """
 function linesearch!(rule::AbstractDFLineSearch,
-                     ψ,
+                     F,
                      w::AbstractVector,
                      d::AbstractVector,
                      z_buf::AbstractVector,
-                     ψz_buf::AbstractVector;
+                     Fz_buf::AbstractVector;
                      maxbt::Int = 50)
     σ = rule.σ
     ρ = rule.ρ
@@ -230,27 +230,27 @@ function linesearch!(rule::AbstractDFLineSearch,
         @inbounds @simd for j in eachindex(w)
             z_buf[j] = w[j] + α * d[j]
         end
-        # ψ_z = ψ(z) — out-of-place
-        ψz_value = ψ(z_buf)
-        @inbounds @simd for j in eachindex(ψz_buf)
-            ψz_buf[j] = ψz_value[j]
+        # F_z = F(z) — out-of-place
+        Fz_value = F(z_buf)
+        @inbounds @simd for j in eachindex(Fz_buf)
+            Fz_buf[j] = Fz_value[j]
         end
         n_evals += 1
 
-        # LHS = -ψ(z)' d
+        # LHS = -F(z)' d
         lhs = 0.0
         @inbounds for j in eachindex(d)
-            lhs -= ψz_buf[j] * d[j]
+            lhs -= Fz_buf[j] * d[j]
         end
 
-        γ = gamma_k(rule, ψz_buf)
+        γ = gamma_k(rule, Fz_buf)
         rhs = σ * α * γ * d_norm_sq
 
         if lhs >= rhs
-            return (α, ψz_buf, n_evals, true)
+            return (α, Fz_buf, n_evals, true)
         end
 
         α *= ρ
     end
-    return (α, ψz_buf, n_evals, false)
+    return (α, Fz_buf, n_evals, false)
 end

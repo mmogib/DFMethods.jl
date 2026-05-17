@@ -1,8 +1,8 @@
 # stopping_criteria.jl — Pluggable stopping criteria for `DFProjection`.
 #
 # Three check points per outer iteration of `step!`:
-#   - at_w:   after ψ(w_k) is computed
-#   - at_z:   after the trial point z_k and ψ(z_k) are computed
+#   - at_w:   after F(w_k) is computed
+#   - at_z:   after the trial point z_k and F(z_k) are computed
 #   - at_end: after the projection step → x_{k+1}
 #
 # Each concrete criterion overrides only the check points it cares about;
@@ -14,8 +14,8 @@
 Supertype for stopping criteria. Concrete subtypes implement any subset of:
 
 ```julia
-should_stop_at_w(crit, cache)   -> (Bool, Symbol)   # after ψ(w_k) eval
-should_stop_at_z(crit, cache)   -> (Bool, Symbol)   # after ψ(z_k) eval
+should_stop_at_w(crit, cache)   -> (Bool, Symbol)   # after F(w_k) eval
+should_stop_at_z(crit, cache)   -> (Bool, Symbol)   # after F(z_k) eval
 should_stop_at_end(crit, cache) -> (Bool, Symbol)   # after projection → x_{k+1}
 ```
 
@@ -59,7 +59,7 @@ should_stop_at_z(::AbstractStoppingCriterion, cache)   = (false, :Default)
 should_stop_at_end(::AbstractStoppingCriterion, cache) = (false, :Default)
 
 # ============================================================================
-# Residual-based criteria (fire after ψ(w_k) and ψ(z_k) evals)
+# Residual-based criteria (fire after F(w_k) and F(z_k) evals)
 # ============================================================================
 
 """
@@ -73,11 +73,11 @@ struct AbsResidualTol <: AbstractStoppingCriterion
 end
 
 function should_stop_at_w(c::AbsResidualTol, cache)
-    return norm(cache.ψw) <= c.abstol ? (true, :Success) : (false, :Default)
+    return norm(cache.Fw) <= c.abstol ? (true, :Success) : (false, :Default)
 end
 
 function should_stop_at_z(c::AbsResidualTol, cache)
-    return norm(cache.ψz) <= c.abstol ? (true, :Success) : (false, :Default)
+    return norm(cache.Fz) <= c.abstol ? (true, :Success) : (false, :Default)
 end
 
 """
@@ -95,13 +95,13 @@ RelResidualTol(rtol::Real; abstol::Real = 0.0) =
     RelResidualTol(Float64(rtol), Float64(abstol))
 
 function should_stop_at_w(c::RelResidualTol, cache)
-    threshold = c.abstol + c.rtol * cache.ψ0_norm
-    return norm(cache.ψw) <= threshold ? (true, :Success) : (false, :Default)
+    threshold = c.abstol + c.rtol * cache.F0_norm
+    return norm(cache.Fw) <= threshold ? (true, :Success) : (false, :Default)
 end
 
 function should_stop_at_z(c::RelResidualTol, cache)
-    threshold = c.abstol + c.rtol * cache.ψ0_norm
-    return norm(cache.ψz) <= threshold ? (true, :Success) : (false, :Default)
+    threshold = c.abstol + c.rtol * cache.F0_norm
+    return norm(cache.Fz) <= threshold ? (true, :Success) : (false, :Default)
 end
 
 # ============================================================================
@@ -205,7 +205,7 @@ User-supplied predicate. `f(cache) -> (stopped::Bool, retcode::Symbol)`.
 Called at end-of-iteration. Use for domain-specific criteria — e.g.,
 stopping when an application-level metric crosses a threshold, or when
 ``\\|\\psi(x_k)\\|`` itself drops (which would require evaluating `f` at
-`cache.x` inside the callback — an extra `ψ` call per iteration).
+`cache.x` inside the callback — an extra `F` call per iteration).
 """
 struct UserStop{F} <: AbstractStoppingCriterion
     f::F

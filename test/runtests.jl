@@ -14,7 +14,7 @@ struct _RecorderDir <: AbstractSearchDirection end
 const _RECORDED_ALPHA_PREV = Ref{Float64}(NaN)
 function DFMethods.direction!(d, ::_RecorderDir, ctx)
     _RECORDED_ALPHA_PREV[] = ctx.α_prev
-    @. d = -ctx.ψw   # steepest descent — always valid
+    @. d = -ctx.Fw   # steepest descent — always valid
     return d
 end
 
@@ -140,14 +140,14 @@ end
         n = 5
 
         # Helper to build a direction! context NamedTuple
-        _ctx(ψw, ψw_prev, w, w_prev, d_prev, k; α_prev=1.0) =
-            (; ψw=ψw, ψw_prev=ψw_prev, w=w, w_prev=w_prev, d_prev=d_prev, k=k, α_prev=α_prev)
+        _ctx(Fw, Fw_prev, w, w_prev, d_prev, k; α_prev=1.0) =
+            (; Fw=Fw, Fw_prev=Fw_prev, w=w, w_prev=w_prev, d_prev=d_prev, k=k, α_prev=α_prev)
 
-        @testset "k = 0: d = -ψ(w)" begin
-            ψw = randn(MersenneTwister(1), n)
-            d  = similar(ψw)
-            direction!(d, rule, _ctx(ψw, ψw, ψw, ψw, similar(ψw), 0))
-            @test d ≈ -ψw
+        @testset "k = 0: d = -F(w)" begin
+            Fw = randn(MersenneTwister(1), n)
+            d  = similar(Fw)
+            direction!(d, rule, _ctx(Fw, Fw, Fw, Fw, similar(Fw), 0))
+            @test d ≈ -Fw
         end
 
         @testset "k ≥ 1: finite output" begin
@@ -155,11 +155,11 @@ end
             w       = randn(rng, n)
             w_prev  = randn(rng, n)
             d_prev  = randn(rng, n)
-            ψw      = randn(rng, n)
-            ψw_prev = randn(rng, n)
+            Fw      = randn(rng, n)
+            Fw_prev = randn(rng, n)
             d       = similar(w)
 
-            direction!(d, rule, _ctx(ψw, ψw_prev, w, w_prev, d_prev, 1))
+            direction!(d, rule, _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
             @test all(isfinite, d)
         end
     end
@@ -169,29 +169,29 @@ end
     # ========================================================================
 
     @testset "gamma_k variants" begin
-        ψz = [3.0, 4.0]
-        @test gamma_k(LSI(),  ψz) == 1.0
-        @test gamma_k(LSII(), ψz) ≈ 5.0
-        @test gamma_k(LSIII(), ψz) ≈ 5.0 / 6.0
-        @test gamma_k(LSIV(τ=0.5), ψz) ≈ 0.5 + 0.5 * 5.0
-        @test gamma_k(LSV(), ψz) == 1.0
-        @test gamma_k(LSVI(; lo=0.5, hi=4.0), ψz) == 4.0
-        @test gamma_k(LSVII(; lo=0.5, Δ_init=2.0), ψz) == 2.5
+        Fz = [3.0, 4.0]
+        @test gamma_k(LSI(),  Fz) == 1.0
+        @test gamma_k(LSII(), Fz) ≈ 5.0
+        @test gamma_k(LSIII(), Fz) ≈ 5.0 / 6.0
+        @test gamma_k(LSIV(τ=0.5), Fz) ≈ 0.5 + 0.5 * 5.0
+        @test gamma_k(LSV(), Fz) == 1.0
+        @test gamma_k(LSVI(; lo=0.5, hi=4.0), Fz) == 4.0
+        @test gamma_k(LSVII(; lo=0.5, Δ_init=2.0), Fz) == 2.5
     end
 
     @testset "linesearch! driver" begin
-        ψ(x) = copy(x)
+        F(x) = copy(x)
         for rule in (LSI(), LSII(), LSIII(), LSIV(), LSV(),
                      LSVI(; lo=0.1, hi=10.0))
             w = [1.0, 1.0]
-            d = -ψ(w)
+            d = -F(w)
             z_buf  = similar(w)
-            ψz_buf = similar(w)
-            α, ψ_z, n_evals, ok = linesearch!(rule, ψ, w, d, z_buf, ψz_buf)
+            Fz_buf = similar(w)
+            α, F_z, n_evals, ok = linesearch!(rule, F, w, d, z_buf, Fz_buf)
             @test ok
             @test 0 < α <= 1
             @test n_evals >= 1
-            @test all(isfinite, ψ_z)
+            @test all(isfinite, F_z)
         end
     end
 
@@ -240,7 +240,7 @@ end
     # ========================================================================
 
     @testset "DFProjection via solve" begin
-        @testset "Unconstrained linear F: ψ(x) = x → x* = 0" begin
+        @testset "Unconstrained linear F: F(x) = x → x* = 0" begin
             f(u, p) = copy(u)
             prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
             alg = DFProjection(;
@@ -258,7 +258,7 @@ end
             @test sol.stats.nf > 0
         end
 
-        @testset "Affine F with box: ψ(x) = x - target, target inside box" begin
+        @testset "Affine F with box: F(x) = x - target, target inside box" begin
             target = [0.3, -0.2]
             f(u, p) = u .- target
             prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0])
@@ -340,7 +340,7 @@ end
 
     @testset "Stopping criteria" begin
         # Build a real cache via init_cache so we can probe criteria
-        F(x) = copy(x)              # ψ(x) = x, ψ(0) = 0
+        F(x) = copy(x)              # F(x) = x, F(0) = 0
         x0 = [1.0, 1.0]
         alg_default = DFProjection()
         cache = init_cache(F, x0, alg_default)
@@ -348,25 +348,25 @@ end
         @testset "AbsResidualTol fires at_w / at_z, not at_end" begin
             c = AbsResidualTol(1e-6)
 
-            cache.ψw .= [0.5, 0.5];   @test should_stop_at_w(c, cache) == (false, :Default)
-            cache.ψw .= [1e-8, 1e-8]; @test should_stop_at_w(c, cache) == (true,  :Success)
+            cache.Fw .= [0.5, 0.5];   @test should_stop_at_w(c, cache) == (false, :Default)
+            cache.Fw .= [1e-8, 1e-8]; @test should_stop_at_w(c, cache) == (true,  :Success)
 
-            cache.ψz .= [0.5, 0.5];   @test should_stop_at_z(c, cache) == (false, :Default)
-            cache.ψz .= [1e-8, 1e-8]; @test should_stop_at_z(c, cache) == (true,  :Success)
+            cache.Fz .= [0.5, 0.5];   @test should_stop_at_z(c, cache) == (false, :Default)
+            cache.Fz .= [1e-8, 1e-8]; @test should_stop_at_z(c, cache) == (true,  :Success)
 
             @test should_stop_at_end(c, cache) == (false, :Default)
         end
 
-        @testset "RelResidualTol uses ψ0_norm" begin
-            cache.ψ0_norm = 2.0
+        @testset "RelResidualTol uses F0_norm" begin
+            cache.F0_norm = 2.0
             c = RelResidualTol(1e-4)
             # threshold = 0 + 1e-4 * 2 = 2e-4
-            cache.ψw .= [1e-3, 1e-3];     @test should_stop_at_w(c, cache) == (false, :Default)
-            cache.ψw .= [1e-5, 1e-5];     @test should_stop_at_w(c, cache) == (true,  :Success)
+            cache.Fw .= [1e-3, 1e-3];     @test should_stop_at_w(c, cache) == (false, :Default)
+            cache.Fw .= [1e-5, 1e-5];     @test should_stop_at_w(c, cache) == (true,  :Success)
 
             # with abstol kwarg
             c2 = RelResidualTol(1e-4; abstol = 1e-3)
-            cache.ψw .= [5e-4, 5e-4];     @test should_stop_at_w(c2, cache) == (true, :Success)
+            cache.Fw .= [5e-4, 5e-4];     @test should_stop_at_w(c2, cache) == (true, :Success)
         end
 
         @testset "StepNormTol fires at_end only" begin
@@ -429,13 +429,13 @@ end
                 MaxIters(100),
             )
             # Neither fires
-            cache.ψw .= [0.5, 0.5]
+            cache.Fw .= [0.5, 0.5]
             cache.k = 50
             @test should_stop_at_w(c, cache)   == (false, :Default)
             @test should_stop_at_end(c, cache) == (false, :Default)
 
             # AbsResidualTol fires at_w
-            cache.ψw .= [1e-8, 1e-8]
+            cache.Fw .= [1e-8, 1e-8]
             @test should_stop_at_w(c, cache) == (true, :Success)
 
             # MaxIters fires at_end
@@ -503,7 +503,7 @@ end
             @test DFProjection() isa SciMLBase.AbstractNonlinearAlgorithm
         end
 
-        @testset "Out-of-place NonlinearProblem: ψ(u,p) = u" begin
+        @testset "Out-of-place NonlinearProblem: F(u,p) = u" begin
             f(u, p) = copy(u)
             prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
             sol = solve(prob, DFProjection(; inertial = NoInertial(),
@@ -527,7 +527,7 @@ end
             @test norm(sol.u) <= 1e-5
         end
 
-        @testset "Parameters p flow through: ψ(u,p) = u - p" begin
+        @testset "Parameters p flow through: F(u,p) = u - p" begin
             f(u, p) = u .- p
             target = [0.3, -0.2]
             prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0], target)
@@ -550,7 +550,7 @@ end
 
         @testset "MaxIters retcode" begin
             # Need a problem that does NOT trivially converge at α=1.
-            # For ψ(u)=u with d_0=-u, z_0 = w + α(-w) = 0 at α=1 — converges
+            # For F(u)=u with d_0=-u, z_0 = w + α(-w) = 0 at α=1 — converges
             # in one step. Use Dai P2 form `u - sin(u)`: solution x* = 0,
             # but with the slow tail near zero (Jacobian = 1 - cos = 0 at 0)
             # so n=10 from ones(10) needs ~16 iterations. Forcing maxiters=2

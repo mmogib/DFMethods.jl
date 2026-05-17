@@ -18,8 +18,8 @@ where `ctx` is a NamedTuple with these fields (see [`AbstractSearchDirection`](@
 
 | Field | Description |
 |---|---|
-| `ctx.ψw` | ``\\psi`` at the inertial point ``w_k`` |
-| `ctx.ψw_prev` | ``\\psi`` at the previous inertial point ``w_{k-1}`` |
+| `ctx.Fw` | ``\\psi`` at the inertial point ``w_k`` |
+| `ctx.Fw_prev` | ``\\psi`` at the previous inertial point ``w_{k-1}`` |
 | `ctx.w`, `ctx.w_prev` | the inertial points themselves |
 | `ctx.d_prev` | previous direction ``d_{k-1}`` |
 | `ctx.k` | iteration index (0-based) |
@@ -28,8 +28,8 @@ where `ctx` is a NamedTuple with these fields (see [`AbstractSearchDirection`](@
 A rule ignores whichever fields it doesn't need. The framework can add fields in future versions without breaking existing rules.
 
 - Mutate `d` in place. `ctx` is read-only.
-- For `ctx.k == 0`, only `ctx.ψw` is meaningful; the other fields may be uninitialized.
-- The framework's convergence theorem (Ibrahim 2026 Thm 3.1) requires the rule to produce a **sufficient-descent** direction (`-ψw' d ≥ c‖ψw‖²` for some `c > 0`) and a **bounded** one (`‖d‖ ≤ c̄‖ψw‖`) — paper eqs. (3)–(4). The framework cannot check these for you.
+- For `ctx.k == 0`, only `ctx.Fw` is meaningful; the other fields may be uninitialized.
+- The framework's convergence theorem (Ibrahim 2026 Thm 3.1) requires the rule to produce a **sufficient-descent** direction (`-Fw' d ≥ c‖Fw‖²` for some `c > 0`) and a **bounded** one (`‖d‖ ≤ c̄‖Fw‖`) — paper eqs. (3)–(4). The framework cannot check these for you.
 
 ### Example: MPRPL direction (Dai, Chen, Wen — AMC 2015, eq. 4.1)
 
@@ -39,27 +39,27 @@ using DFMethods, LinearAlgebra
 struct MPRPL_Direction <: AbstractSearchDirection end
 
 function DFMethods.direction!(d, ::MPRPL_Direction, ctx)
-    ψw, ψw_prev, d_prev, k = ctx.ψw, ctx.ψw_prev, ctx.d_prev, ctx.k
+    Fw, Fw_prev, d_prev, k = ctx.Fw, ctx.Fw_prev, ctx.d_prev, ctx.k
 
     if k == 0
-        @. d = -ψw
+        @. d = -Fw
         return d
     end
 
-    ψw_y = ψwm_sq = ψw_d = ψw_sq = 0.0
-    @inbounds for i in eachindex(ψw)
-        yi      = ψw[i] - ψw_prev[i]
-        ψw_y   += ψw[i] * yi
-        ψwm_sq += ψw_prev[i]^2
-        ψw_d   += ψw[i] * d_prev[i]
-        ψw_sq  += ψw[i]^2
+    Fw_y = Fwm_sq = Fw_d = Fw_sq = 0.0
+    @inbounds for i in eachindex(Fw)
+        yi      = Fw[i] - Fw_prev[i]
+        Fw_y   += Fw[i] * yi
+        Fwm_sq += Fw_prev[i]^2
+        Fw_d   += Fw[i] * d_prev[i]
+        Fw_sq  += Fw[i]^2
     end
 
-    β_PRP   = ψw_y / max(ψwm_sq, eps())
-    coeff_ψ = -(1.0 + β_PRP * ψw_d / max(ψw_sq, eps()))
+    β_PRP   = Fw_y / max(Fwm_sq, eps())
+    coeff_F = -(1.0 + β_PRP * Fw_d / max(Fw_sq, eps()))
 
-    @inbounds @simd for i in eachindex(ψw)
-        d[i] = coeff_ψ * ψw[i] + β_PRP * d_prev[i]
+    @inbounds @simd for i in eachindex(Fw)
+        d[i] = coeff_F * Fw[i] + β_PRP * d_prev[i]
     end
     return d
 end
@@ -69,10 +69,10 @@ If your direction needs the previous step displacement (e.g. for a Dai–Liao up
 
 ```julia
 function DFMethods.direction!(d, ::MyDirection, ctx)
-    ψw, ψw_prev, d_prev, k, α_prev =
-        ctx.ψw, ctx.ψw_prev, ctx.d_prev, ctx.k, ctx.α_prev
+    Fw, Fw_prev, d_prev, k, α_prev =
+        ctx.Fw, ctx.Fw_prev, ctx.d_prev, ctx.k, ctx.α_prev
     if k == 0
-        @. d = -ψw
+        @. d = -Fw
         return d
     end
     # ... use s_{k-1} = α_prev .* d_prev wherever needed ...
@@ -84,7 +84,7 @@ end
 **Contract:** subtype [`AbstractDFLineSearch`](@ref) with fields `σ::Float64` (Armijo coefficient) and `ρ::Float64` (backtracking factor), and implement
 
 ```julia
-DFMethods.gamma_k(rule, ψ_z) -> Float64
+DFMethods.gamma_k(rule, F_z) -> Float64
 ```
 
 The shared `linesearch!` driver plugs your `γ_k` into the unified descent condition $-\psi(z)^\top d \geq \sigma \alpha \gamma_k \|d\|^2$ and backtracks $\alpha = \rho^i$ for you.
@@ -98,7 +98,7 @@ Base.@kwdef struct LSPower <: AbstractDFLineSearch
     p::Float64 = 0.5
 end
 
-DFMethods.gamma_k(rule::LSPower, ψ_z) = norm(ψ_z)^rule.p
+DFMethods.gamma_k(rule::LSPower, F_z) = norm(F_z)^rule.p
 ```
 
 `p = 1.0` recovers [`LSII`](@ref); `p = 0.0` recovers [`LSI`](@ref); `p ∈ (0, 1)` interpolates and is often empirically gentler on stiff problems.
