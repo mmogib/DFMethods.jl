@@ -35,3 +35,33 @@ This is an internal helper (not exported). The `DFProjectionCache`
 constructor calls it once per pluggable component during `init_cache`.
 """
 function init_state end
+
+"""
+    AbstractIterateUpdate
+
+Supertype for the iterate-update strategy: given the inputs
+`(w, d, α, z, Fw, Fz, set, k, ζ, inner_maxiter, state)`, produce
+`x_{k+1}`. Concrete subtypes implement
+
+```julia
+update_iterate!(x_new, rule::AbstractIterateUpdate, ctx)
+```
+
+writing into `x_new` and returning it. `ctx` is a NamedTuple; see
+[`SolodovSvaiterProjection`](@ref), [`DirectUpdate`](@ref), and
+[`HalpernUpdate`](@ref) for built-in strategies.
+
+The strategy may declare its per-solve state via `init_state(rule, prob, x0, alg)`.
+The state is held on `DFProjectionCache.iterate_update_state` and surfaced
+to `update_iterate!` via `ctx.state`.
+"""
+abstract type AbstractIterateUpdate end
+
+"""
+    update_iterate!(x_new, rule::AbstractIterateUpdate, ctx) -> x_new
+
+In-place: write the next iterate into `x_new` per `rule`'s logic.
+`ctx` is a NamedTuple with fields `w`, `d`, `α`, `z`, `Fw`, `Fz`, `set`,
+`k`, `ζ`, `inner_maxiter`, `state`. See [`AbstractIterateUpdate`](@ref).
+"""
+function update_iterate! end

@@ -11,33 +11,10 @@
 # HalfSpace struct each outer iteration, we accept the hyperplane
 # normal `a` and offset `c` directly and inline the halfspace projection.
 
-# ============================================================================
-# SolodovSvaiterState: per-solve scratch for the Solodov–Svaiter projection step.
-# ============================================================================
-#
-# Owns the projection target buffer and Dykstra's four inner buffers. Lives
-# in `DFProjectionCache.iterate_update_state`. In Stage 2 this is the only
-# concrete iterate-update state type; Stage 4 generalizes via a pluggable
-# `AbstractIterateUpdate` and moves this struct + its constructor into
-# `src/iterate_updates.jl`.
-
-struct SolodovSvaiterState
-    proj_target::Vector{Float64}     # `w - λ F(z)`
-    proj_p::Vector{Float64}          # Dykstra correction for X
-    proj_q::Vector{Float64}          # Dykstra correction for H
-    proj_scratch::Vector{Float64}    # post-X-projection iterate
-    proj_out_prev::Vector{Float64}   # previous Dykstra iterate (for ε-stop)
-end
-
-function SolodovSvaiterState(n::Int)
-    SolodovSvaiterState(
-        Vector{Float64}(undef, n),       # proj_target
-        zeros(n),                        # proj_p
-        zeros(n),                        # proj_q
-        Vector{Float64}(undef, n),       # proj_scratch
-        Vector{Float64}(undef, n),       # proj_out_prev
-    )
-end
+# Note: `SolodovSvaiterState` moved to `iterate_updates.jl` in Stage 4 —
+# it's the per-solve state for the SolodovSvaiterProjection strategy, not
+# a generic projection-step concern. `approx_project_X_halfspace!` below
+# remains as a shared helper that the strategy calls.
 
 """
     approx_project_X_halfspace!(out, target, X, a, c, ε,

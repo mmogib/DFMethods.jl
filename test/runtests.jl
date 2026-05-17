@@ -170,6 +170,87 @@ end
     # ========================================================================
 
     # ========================================================================
+    # v0.2 iterate update (Section A) — pluggable steps 6–7
+    # ========================================================================
+
+    @testset "v0.2 iterate update (Section A)" begin
+        @testset "AbstractIterateUpdate hierarchy" begin
+            @test SolodovSvaiterProjection() isa AbstractIterateUpdate
+            @test DirectUpdate()             isa AbstractIterateUpdate
+            @test HalpernUpdate(0.5)         isa AbstractIterateUpdate
+        end
+
+        @testset "Default DFProjection uses SolodovSvaiterProjection" begin
+            alg = DFProjection()
+            @test alg.iterate_update isa SolodovSvaiterProjection
+        end
+
+        @testset "SolodovSvaiterProjection: end-to-end solve" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = SolodovSvaiterProjection(),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                abstol         = 1e-6,
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-5
+        end
+
+        @testset "DirectUpdate: x_{k+1} = project(z, set)" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = DirectUpdate(),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-4
+        end
+
+        @testset "HalpernUpdate with constant β=0 (≈ DirectUpdate)" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = HalpernUpdate(0.0),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "HalpernUpdate with β = k -> 1/(k+2)" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = HalpernUpdate(k -> 1.0 / (k + 2)),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 1000,
+            )
+            sol = solve(prob, alg)
+            @test SciMLBase.successful_retcode(sol.retcode) ||
+                  sol.retcode == SciMLBase.ReturnCode.MaxIters
+        end
+
+        @testset "init_state for iterate-update strategies" begin
+            f(u, p) = copy(u); x0 = [1.0, 1.0]; alg = DFProjection()
+            prob = SciMLBase.NonlinearProblem(f, x0)
+            @test DFMethods.init_state(SolodovSvaiterProjection(), prob, x0, alg) isa DFMethods.SolodovSvaiterState
+            @test DFMethods.init_state(DirectUpdate(),             prob, x0, alg) === nothing
+            @test DFMethods.init_state(HalpernUpdate(0.5),         prob, x0, alg) isa DFMethods.HalpernState
+        end
+    end
+
+    # ========================================================================
     # v0.2 line searches (Section B) — LineSearch.jl-aligned
     # ========================================================================
 

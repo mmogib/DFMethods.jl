@@ -12,6 +12,7 @@ include("inertial.jl")                    # Inertial extrapolation rules
 include("search_directions.jl")           # AbstractSearchDirection + SpectralThreeTerm
 include("line_searches.jl")               # AbstractDFLineSearch + LSI..LSVII
 include("projection.jl")                  # Approximate projection onto X ∩ H_k
+include("iterate_updates.jl")             # AbstractIterateUpdate + Solodov–Svaiter / Direct / Halpern
 include("stopping_criteria.jl")           # AbstractStoppingCriterion + variants
 include("algorithm.jl")                   # DFProjection + cache + step!
 include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
@@ -37,6 +38,11 @@ export
 
     # line_searches.jl (LineSearch.jl-aligned)
     ConstantBacktrack, ResidualNormBacktrack, AdaptiveClampedBacktrack,
+
+    # iterate_updates.jl
+    AbstractIterateUpdate,
+    SolodovSvaiterProjection, DirectUpdate, HalpernUpdate,
+    update_iterate!,
 
     # stopping_criteria.jl
     AbstractStoppingCriterion,

@@ -49,7 +49,8 @@ struct DFProjection{Dir<:AbstractSearchDirection,
                     LS<:LineSearch.AbstractLineSearchAlgorithm,
                     In<:AbstractInertialRule,
                     Set<:AbstractConstraintSet,
-                    Stop<:AbstractStoppingCriterion} <: AbstractDFProjection
+                    Stop<:AbstractStoppingCriterion,
+                    IU<:AbstractIterateUpdate} <: AbstractDFProjection
     direction::Dir
     linesearch::LS
     inertial::In
@@ -60,6 +61,7 @@ struct DFProjection{Dir<:AbstractSearchDirection,
     ζ::Float64
     inner_maxiter::Int
     maxbt::Int
+    iterate_update::IU
 end
 
 function DFProjection(;
@@ -73,13 +75,15 @@ function DFProjection(;
         ζ::Real          = 0.5,
         inner_maxiter::Int = 500,
         maxbt::Int       = 50,
+        iterate_update = SolodovSvaiterProjection(),
     )
     stop = stopping === nothing ?
         AnyOf(AbsResidualTol(Float64(abstol)), MaxIters(maxiters)) :
         stopping
     return DFProjection(direction, linesearch, inertial, set,
                         Float64(abstol), maxiters, stop,
-                        Float64(ζ), inner_maxiter, maxbt)
+                        Float64(ζ), inner_maxiter, maxbt,
+                        iterate_update)
 end
 
 # ============================================================================
@@ -195,13 +199,14 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     end
     F0_norm = sqrt(s)
 
-    # Pluggable component state. The iterate-update strategy stays
-    # hardcoded (becomes pluggable in Stage 4 with AbstractIterateUpdate).
-    # Direction and stopping use init_state with `nothing` as the prob
-    # placeholder — neither default reads it.
-    dir_state            = init_state(alg.direction, nothing, x0, alg)
-    iterate_update_state = SolodovSvaiterState(n)
-    stopping_state       = init_state(alg.stopping, nothing, x0, alg)
+    # Pluggable component state. All four go through init_state — defaults
+    # are `nothing` for components that don't need scratch
+    # (SpectralThreeTerm, DirectUpdate, most stopping criteria);
+    # SolodovSvaiterProjection allocates its Dykstra buffers; HalpernUpdate
+    # stores x_0.
+    dir_state            = init_state(alg.direction,      nothing, x0, alg)
+    iterate_update_state = init_state(alg.iterate_update, nothing, x0, alg)
+    stopping_state       = init_state(alg.stopping,       nothing, x0, alg)
 
     # Line-search cache via LineSearch.jl's CommonSolve.init contract.
     # Synthesize a NonlinearProblem from the F closure (test-friendly path).
@@ -360,7 +365,10 @@ function step!(cache::DFProjectionCache)
         end
     end
 
-    # Degeneracy guard: λ_k = Fz'(w-z) / ‖Fz‖² needs ‖Fz‖ > 0.
+    # Degeneracy guard: applies to any iterate-update strategy that uses
+    # the F(z) value as a normalizing denominator (Solodov–Svaiter does
+    # via λ_k = F(z)'(w-z) / ‖F(z)‖²). Cheaper to check here once than
+    # to defend inside each strategy.
     Fz_norm = _norm2(cache.Fz)
     if Fz_norm < eps()
         cache.resid   = Fz_norm
@@ -369,35 +377,19 @@ function step!(cache::DFProjectionCache)
         return cache
     end
 
-    # ── Step 7: hyperplane H_k and approximate projection ─────────────────────
-    # H_k = {x : Fz' (x - z_k) ≤ 0}  →  a = Fz, c = Fz' z_k
-    # λ_k = Fz'(w_k - z_k) / ‖Fz‖²
-    inner_wz   = 0.0
-    inner_Fz_z = 0.0
-    Fz_norm_sq = Fz_norm * Fz_norm
-    @inbounds for i in eachindex(cache.w)
-        inner_wz   += cache.Fz[i] * (cache.w[i] - cache.z[i])
-        inner_Fz_z += cache.Fz[i] * cache.z[i]
-    end
-    λ = inner_wz / Fz_norm_sq
-
-    ss = cache.iterate_update_state   # SolodovSvaiterState
-
-    # target = w_k - λ Fz
-    @inbounds @simd for i in eachindex(cache.w)
-        ss.proj_target[i] = cache.w[i] - λ * cache.Fz[i]
-    end
-
-    # ε_k = (ζ²/2) ‖λ Fz‖² = (ζ²/2) λ² ‖Fz‖²
-    ε_k = 0.5 * alg.ζ^2 * λ * λ * Fz_norm_sq
-
-    # Project onto X ∩ H_k
-    approx_project_X_halfspace!(cache.x_new, ss.proj_target,
-                                alg.set,
-                                cache.Fz, inner_Fz_z, ε_k,
-                                ss.proj_p, ss.proj_q,
-                                ss.proj_scratch, ss.proj_out_prev;
-                                maxiter = alg.inner_maxiter)
+    # ── Steps 6–7: delegate to the iterate-update strategy ───────────────────
+    update_ctx = (; w     = cache.w,
+                    d     = cache.d,
+                    α     = α,
+                    z     = cache.z,
+                    Fw    = cache.Fw,
+                    Fz    = cache.Fz,
+                    set   = alg.set,
+                    k     = k,
+                    ζ     = alg.ζ,
+                    inner_maxiter = alg.inner_maxiter,
+                    state = cache.iterate_update_state)
+    update_iterate!(cache.x_new, alg.iterate_update, update_ctx)
 
     # ── Step 8: shift state for next iteration ────────────────────────────────
     copyto!(cache.x_prev,    cache.x)
