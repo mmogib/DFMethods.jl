@@ -46,7 +46,7 @@ SciMLBase kwarg overrides) but `step!` ignores them in favour of the
 supplied `stopping`.
 """
 struct DFProjection{Dir<:AbstractSearchDirection,
-                    LS<:AbstractDFLineSearch,
+                    LS<:LineSearch.AbstractLineSearchAlgorithm,
                     In<:AbstractInertialRule,
                     Set<:AbstractConstraintSet,
                     Stop<:AbstractStoppingCriterion} <: AbstractDFProjection
@@ -64,7 +64,7 @@ end
 
 function DFProjection(;
         direction  = SpectralThreeTerm(),
-        linesearch = LSII(),
+        linesearch = ResidualNormBacktrack(),
         inertial   = Inertial(0.25),
         set        = RealSpace(),
         abstol::Real     = 1e-6,
@@ -186,23 +186,30 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     x_new   = similar(x)
     scratch1 = similar(x)
 
-    # Pluggable component state. Stage 2: line_search_cache and the iterate
-    # update strategy slot are still hardcoded (LineSearch.jl adopted in
-    # Stage 3; AbstractIterateUpdate added in Stage 4). Direction and stopping
-    # use init_state with `nothing` as the placeholder for `prob` since neither
-    # default reads it; Stage 3+ will pass the NonlinearProblem when available.
-    dir_state            = init_state(alg.direction, nothing, x0, alg)
-    line_search_cache    = nothing
-    iterate_update_state = SolodovSvaiterState(n)
-    stopping_state       = init_state(alg.stopping, nothing, x0, alg)
-
-    # One initial F-eval for F0_norm (used by `RelResidualTol`).
+    # One initial F-eval (needed for F0_norm and as the `fu` argument to
+    # CommonSolve.init for the line search).
     Fx0 = F(x)
     s = 0.0
     @inbounds for i in eachindex(Fx0)
         s += Fx0[i] * Fx0[i]
     end
     F0_norm = sqrt(s)
+
+    # Pluggable component state. The iterate-update strategy stays
+    # hardcoded (becomes pluggable in Stage 4 with AbstractIterateUpdate).
+    # Direction and stopping use init_state with `nothing` as the prob
+    # placeholder — neither default reads it.
+    dir_state            = init_state(alg.direction, nothing, x0, alg)
+    iterate_update_state = SolodovSvaiterState(n)
+    stopping_state       = init_state(alg.stopping, nothing, x0, alg)
+
+    # Line-search cache via LineSearch.jl's CommonSolve.init contract.
+    # Synthesize a NonlinearProblem from the F closure (test-friendly path).
+    # The standard SciML route goes through DFSciMLCache which already has
+    # the real prob; that path bypasses this synthesizing.
+    f_2arg(u, p) = F(u)
+    prob_synth = SciMLBase.NonlinearProblem(f_2arg, x)
+    line_search_cache = CommonSolve.init(prob_synth, alg.linesearch, Fx0, x)
 
     return DFProjectionCache(
         alg, F,
@@ -224,6 +231,31 @@ end
 # ============================================================================
 # Helpers
 # ============================================================================
+
+# Copy z and F(z) from the line-search cache into `cache.z` / `cache.Fz`,
+# and credit any F evaluations the line search did. Fast path when the
+# inner cache exposes our DFMethods fields (z_cache, fu_cache, n_evals);
+# fallback recomputes F(z) for ecosystem line-search caches that don't.
+@inline function _harvest_linesearch_state!(cache, α)
+    ls = cache.line_search_cache
+    if hasfield(typeof(ls), :z_cache) && hasfield(typeof(ls), :fu_cache) &&
+       hasfield(typeof(ls), :n_evals)
+        copyto!(cache.z,  ls.z_cache)
+        copyto!(cache.Fz, ls.fu_cache)
+        cache.n_evals += ls.n_evals
+    else
+        # Ecosystem line search — recompute z, F(z), eat one extra F-eval.
+        @inbounds @simd for j in eachindex(cache.w)
+            cache.z[j] = cache.w[j] + α * cache.d[j]
+        end
+        Fz_value = cache.F(cache.z)
+        @inbounds @simd for j in eachindex(cache.Fz)
+            cache.Fz[j] = Fz_value[j]
+        end
+        cache.n_evals += 1
+    end
+    return nothing
+end
 
 @inline function _norm2(v::AbstractVector)
     s = 0.0
@@ -298,11 +330,14 @@ function step!(cache::DFProjectionCache)
     direction!(cache.d, alg.direction, ctx)
 
     # ── Step 5: backtracking line search → α_k, z_k, F(z_k) ──────────────────
-    α, _, n_evals_ls, ok = linesearch!(alg.linesearch, F,
-                                       cache.w, cache.d,
-                                       cache.z, cache.Fz;
-                                       maxbt = alg.maxbt)
-    cache.n_evals += n_evals_ls
+    # LineSearch.jl-aligned: solve!(line_search_cache, u, du) -> LineSearchSolution.
+    # Our DFMethods caches expose z_cache, fu_cache, n_evals so we don't pay an
+    # extra F evaluation per outer iteration; for third-party LineSearch.jl
+    # algorithms (e.g. LiFukushimaLineSearch) we recompute Fz ourselves.
+    ls_sol = CommonSolve.solve!(cache.line_search_cache, cache.w, cache.d)
+    α  = ls_sol.step_size
+    ok = ls_sol.retcode === SciMLBase.ReturnCode.Success
+    _harvest_linesearch_state!(cache, α)
 
     if !ok
         # Line search failed — report best-effort residual at w_k

@@ -35,12 +35,7 @@ export
     SpectralThreeTerm,
     direction!,
 
-    # line_searches.jl (v0.1, will drop in 3c)
-    AbstractDFLineSearch,
-    LSI, LSII, LSIII, LSIV, LSV, LSVI, LSVII,
-    gamma_k,
-
-    # line_searches.jl (v0.2, Section B — LineSearch.jl-aligned)
+    # line_searches.jl (LineSearch.jl-aligned)
     ConstantBacktrack, ResidualNormBacktrack, AdaptiveClampedBacktrack,
 
     # stopping_criteria.jl

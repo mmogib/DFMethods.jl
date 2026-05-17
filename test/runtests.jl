@@ -7,8 +7,7 @@ using CommonSolve
 using LineSearch
 
 # Internal helpers — not part of the public API, but exercised by tests.
-using DFMethods: inertial_coef, apply_inertial!,
-                 linesearch!, approx_project_X_halfspace!
+using DFMethods: inertial_coef, apply_inertial!, approx_project_X_halfspace!
 
 # Recorder direction for testing α_prev plumbing in `step!`. Captures the
 # α_prev value that `step!` passes through `ctx` to `direction!(d, rule, ctx)`.
@@ -170,33 +169,6 @@ end
     # Line searches
     # ========================================================================
 
-    @testset "gamma_k variants" begin
-        Fz = [3.0, 4.0]
-        @test gamma_k(LSI(),  Fz) == 1.0
-        @test gamma_k(LSII(), Fz) ≈ 5.0
-        @test gamma_k(LSIII(), Fz) ≈ 5.0 / 6.0
-        @test gamma_k(LSIV(τ=0.5), Fz) ≈ 0.5 + 0.5 * 5.0
-        @test gamma_k(LSV(), Fz) == 1.0
-        @test gamma_k(LSVI(; lo=0.5, hi=4.0), Fz) == 4.0
-        @test gamma_k(LSVII(; lo=0.5, Δ_init=2.0), Fz) == 2.5
-    end
-
-    @testset "linesearch! driver" begin
-        F(x) = copy(x)
-        for rule in (LSI(), LSII(), LSIII(), LSIV(), LSV(),
-                     LSVI(; lo=0.1, hi=10.0))
-            w = [1.0, 1.0]
-            d = -F(w)
-            z_buf  = similar(w)
-            Fz_buf = similar(w)
-            α, F_z, n_evals, ok = linesearch!(rule, F, w, d, z_buf, Fz_buf)
-            @test ok
-            @test 0 < α <= 1
-            @test n_evals >= 1
-            @test all(isfinite, F_z)
-        end
-    end
-
     # ========================================================================
     # v0.2 line searches (Section B) — LineSearch.jl-aligned
     # ========================================================================
@@ -323,7 +295,7 @@ end
             prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
-                linesearch = LSI(),
+                linesearch = ConstantBacktrack(),
                 inertial   = NoInertial(),
                 set        = RealSpace(),
                 abstol     = 1e-6,
@@ -342,7 +314,7 @@ end
             prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0])
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
-                linesearch = LSII(),
+                linesearch = ResidualNormBacktrack(),
                 inertial   = Inertial(0.25),
                 set        = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 abstol     = 1e-6,
@@ -368,7 +340,7 @@ end
         @testset "Constructor defaults" begin
             alg = DFProjection()
             @test alg.direction  isa SpectralThreeTerm
-            @test alg.linesearch isa LSII
+            @test alg.linesearch isa ResidualNormBacktrack
             @test alg.inertial   isa Inertial
             @test alg.set        isa RealSpace
             @test alg.abstol     == 1e-6
@@ -388,10 +360,13 @@ end
             @test hasfield(typeof(cache), :iterate_update_state)
             @test hasfield(typeof(cache), :stopping_state)
 
-            # In Stage 2: direction / line_search / stopping default to nothing;
+            # Stage 3c state: direction + stopping default to nothing;
+            # line_search_cache holds a LineSearch.AbstractLineSearchCache
+            # (the default `ResidualNormBacktrack`'s cache);
             # iterate_update_state holds the projection scratch
             @test cache.direction_state === nothing
-            @test cache.line_search_cache === nothing
+            @test cache.line_search_cache isa LineSearch.AbstractLineSearchCache
+            @test cache.line_search_cache isa DFMethods.ResidualNormBacktrackCache
             @test cache.stopping_state === nothing
             @test cache.iterate_update_state isa DFMethods.SolodovSvaiterState
             @test length(cache.iterate_update_state.proj_target) == length(x0)

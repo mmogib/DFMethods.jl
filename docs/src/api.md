@@ -44,17 +44,14 @@ direction!
 ## Line searches
 
 ```@docs
-AbstractDFLineSearch
-LSI
-LSII
-LSIII
-LSIV
-LSV
-LSVI
-LSVII
-gamma_k
-linesearch!
+ConstantBacktrack
+ResidualNormBacktrack
+AdaptiveClampedBacktrack
 ```
+
+Each is a subtype of `LineSearch.AbstractLineSearchAlgorithm` (from
+[`LineSearch.jl`](https://github.com/SciML/LineSearch.jl)) and implements
+the standard `CommonSolve.init` / `CommonSolve.solve!` contract.
 
 ## Inertial rules
 
