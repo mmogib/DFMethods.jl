@@ -48,14 +48,12 @@ supplied `stopping`.
 struct DFProjection{Dir<:AbstractSearchDirection,
                     LS<:LineSearch.AbstractLineSearchAlgorithm,
                     In<:AbstractInertialRule,
-                    Set<:AbstractConstraintSet,
                     Stop<:AbstractStoppingCriterion,
                     IU<:AbstractIterateUpdate,
                     CB<:Vector{<:AbstractCallback}} <: AbstractDFProjection
     direction::Dir
     linesearch::LS
     inertial::In
-    set::Set
     abstol::Float64
     maxiters::Int
     stopping::Stop
@@ -70,7 +68,6 @@ function DFProjection(;
         direction  = SpectralThreeTerm(),
         linesearch = ResidualNormBacktrack(),
         inertial   = Inertial(0.25),
-        set        = RealSpace(),
         abstol::Real     = 1e-6,
         maxiters::Int    = 2000,
         stopping::Union{Nothing, AbstractStoppingCriterion} = nothing,
@@ -83,7 +80,7 @@ function DFProjection(;
     stop = stopping === nothing ?
         AnyOf(AbsResidualTol(Float64(abstol)), MaxIters(maxiters)) :
         stopping
-    return DFProjection(direction, linesearch, inertial, set,
+    return DFProjection(direction, linesearch, inertial,
                         Float64(abstol), maxiters, stop,
                         Float64(ζ), inner_maxiter, maxbt,
                         iterate_update, callbacks)
@@ -119,9 +116,11 @@ per-iteration buffers are pre-allocated; `step!` does not allocate.
 - `α_prev::Float64` — previous line-search step size, surfaced to `direction!` via `ctx.α_prev`.
 """
 mutable struct DFProjectionCache{Alg<:DFProjection, F,
+                                  S<:AbstractConstraintSet,
                                   DirState, LSCache, IUpState, StopState}
     alg::Alg
     F::F
+    set::S    # resolved at init_cache time from the problem (Stage 6)
 
     # Common per-iteration state
     x::Vector{Float64}
@@ -171,15 +170,16 @@ end
     init_cache(F, x0, alg) -> DFProjectionCache
 
 Allocate per-solve buffers and prepare the initial state. Projects
-`x0` onto `alg.set` to ensure feasibility (paper assumes `x_0 ∈ X`).
+`x0` onto `set` to ensure feasibility (paper assumes `x_0 ∈ X`).
 Evaluates `F` once at the projected `x_0` to populate `F0_norm`
 (used by `RelResidualTol`) and starts the wall-clock for `MaxTime`.
 """
-function init_cache(F, x0::AbstractVector, alg::DFProjection)
+function init_cache(F, x0::AbstractVector, alg::DFProjection;
+                     set::AbstractConstraintSet = RealSpace())
     n = length(x0)
 
     x       = Vector{Float64}(undef, n)
-    project!(x, x0, alg.set)                # ensure feasibility
+    project!(x, x0, set)                    # ensure feasibility (Stage 6: set from problem)
 
     x_prev  = copy(x)                       # k=0 doesn't use x_prev
     w       = similar(x)
@@ -220,7 +220,7 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     line_search_cache = CommonSolve.init(prob_synth, alg.linesearch, Fx0, x)
 
     cache = DFProjectionCache(
-        alg, F,
+        alg, F, set,
         x, x_prev, w, w_prev, z, d, d_prev,
         Fw, Fw_prev, Fz, x_new, scratch1,
         dir_state, line_search_cache, iterate_update_state, stopping_state,
@@ -362,7 +362,7 @@ function step!(cache::DFProjectionCache)
     if cache.done
         # Stopping fired on cache.Fz — z is the converged point (if feasible)
         if cache.retcode === :Success
-            if _is_feasible(cache.z, alg.set, cache.scratch1)
+            if _is_feasible(cache.z, cache.set, cache.scratch1)
                 copyto!(cache.x, cache.z)
                 cache.resid = _norm2(cache.Fz)
             else
@@ -374,7 +374,7 @@ function step!(cache::DFProjectionCache)
         else
             # Non-Success stop (e.g., user-defined) — accept z if feasible,
             # else accept current x.
-            if _is_feasible(cache.z, alg.set, cache.scratch1)
+            if _is_feasible(cache.z, cache.set, cache.scratch1)
                 copyto!(cache.x, cache.z)
                 cache.resid = _norm2(cache.Fz)
             else
@@ -402,7 +402,7 @@ function step!(cache::DFProjectionCache)
                     z     = cache.z,
                     Fw    = cache.Fw,
                     Fz    = cache.Fz,
-                    set   = alg.set,
+                    set   = cache.set,
                     k     = k,
                     ζ     = alg.ζ,
                     inner_maxiter = alg.inner_maxiter,

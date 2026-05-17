@@ -22,6 +22,7 @@ include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
 export
     # types.jl
     AbstractDFProjection,
+    ConstrainedNonlinearProblem,
 
     # constraint_sets.jl
     AbstractConstraintSet,

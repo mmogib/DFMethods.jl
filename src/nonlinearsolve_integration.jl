@@ -49,6 +49,49 @@ end
 # DFMethods retcode → SciMLBase.ReturnCode
 # ============================================================================
 
+# ============================================================================
+# Constraint set resolver — read from the problem (Stage 6 SciML alignment)
+# ============================================================================
+#
+# The constraint set belongs to the *problem*, not the *algorithm*. Three
+# routes the user can use:
+#
+#   NonlinearProblem(F, u0)                              → RealSpace
+#   NonlinearProblem(F, u0; lb = …, ub = …)              → BoxSet(lb, ub)
+#   ConstrainedNonlinearProblem(prob_or_F, …; set = …)   → user-supplied set
+
+"""
+    _constraint_set(prob) -> AbstractConstraintSet
+
+Resolve the effective constraint set from the problem. For
+`ConstrainedNonlinearProblem`, returns `prob.set`. For a vanilla
+`NonlinearProblem`, derives `BoxSet(lb, ub)` from `prob.lb`/`prob.ub` if
+either is non-`nothing`; otherwise `RealSpace()`. Internal helper.
+"""
+_constraint_set(prob::ConstrainedNonlinearProblem) = prob.set
+
+function _constraint_set(prob::SciMLBase.NonlinearProblem)
+    lb, ub = prob.lb, prob.ub
+    if lb === nothing && ub === nothing
+        return RealSpace()
+    end
+    n = length(prob.u0)
+    lo = lb === nothing ? fill(-Inf, n) : collect(Float64, lb)
+    hi = ub === nothing ? fill(+Inf, n) : collect(Float64, ub)
+    return BoxSet(lo, hi)
+end
+
+# F-wrapper for ConstrainedNonlinearProblem delegates to the inner.
+_wrap_problem_F(prob::ConstrainedNonlinearProblem) = _wrap_problem_F(prob.inner)
+
+# u0 accessor (used by CommonSolve.init below)
+_problem_u0(prob::SciMLBase.NonlinearProblem)      = prob.u0
+_problem_u0(prob::ConstrainedNonlinearProblem)     = prob.inner.u0
+
+# build_solution wants a NonlinearProblem; pass the inner if wrapped.
+_inner_problem(prob::SciMLBase.NonlinearProblem)   = prob
+_inner_problem(prob::ConstrainedNonlinearProblem)  = prob.inner
+
 @inline function _to_sciml_retcode(rc::Symbol)
     rc === :Success            ? SciMLBase.ReturnCode.Success    :
     rc === :MaxIters           ? SciMLBase.ReturnCode.MaxIters   :
@@ -69,15 +112,16 @@ function _alg_with_overrides(alg::DFProjection, abstol::Real, maxiters::Int)
         return alg
     end
     return DFProjection(;
-        direction     = alg.direction,
-        linesearch    = alg.linesearch,
-        inertial      = alg.inertial,
-        set           = alg.set,
-        abstol        = Float64(abstol),
-        maxiters      = maxiters,
-        ζ             = alg.ζ,
-        inner_maxiter = alg.inner_maxiter,
-        maxbt         = alg.maxbt,
+        direction      = alg.direction,
+        linesearch     = alg.linesearch,
+        inertial       = alg.inertial,
+        abstol         = Float64(abstol),
+        maxiters       = maxiters,
+        ζ              = alg.ζ,
+        inner_maxiter  = alg.inner_maxiter,
+        maxbt          = alg.maxbt,
+        iterate_update = alg.iterate_update,
+        callbacks      = alg.callbacks,
     )
 end
 
@@ -93,9 +137,7 @@ the original `NonlinearProblem`, the user-facing algorithm, and the
 inner Phase 2 `DFProjectionCache`. `CommonSolve.solve!` drives the inner
 cache to termination and packages the result as a `NonlinearSolution`.
 """
-mutable struct DFSciMLCache{Prob<:SciMLBase.NonlinearProblem,
-                            Alg<:DFProjection,
-                            Inner<:DFProjectionCache}
+mutable struct DFSciMLCache{Prob, Alg<:DFProjection, Inner<:DFProjectionCache}
     prob::Prob
     alg::Alg
     inner::Inner
@@ -114,14 +156,17 @@ Build a cache for `solve(prob, alg; …)`. Accepts SciML's standard
 other kwargs are absorbed without effect (Phase 3 polish: route
 `verbose`, `callback`, etc.).
 """
-function CommonSolve.init(prob::SciMLBase.NonlinearProblem, alg::DFProjection;
+function CommonSolve.init(prob::Union{SciMLBase.NonlinearProblem,
+                                       ConstrainedNonlinearProblem},
+                          alg::DFProjection;
                           abstol::Real  = alg.abstol,
                           maxiters::Int = alg.maxiters,
                           kwargs...)
     F       = _wrap_problem_F(prob)
-    x0      = collect(Float64, prob.u0)
+    x0      = collect(Float64, _problem_u0(prob))
+    set     = _constraint_set(prob)
     alg_eff = _alg_with_overrides(alg, abstol, maxiters)
-    inner   = init_cache(F, x0, alg_eff)
+    inner   = init_cache(F, x0, alg_eff; set = set)
     return DFSciMLCache(prob, alg, inner)
 end
 
@@ -156,7 +201,7 @@ function CommonSolve.solve!(cache::DFSciMLCache)
 
     resid_vec = inner.F(inner.x)
     stats = SciMLBase.NLStats(inner.n_evals + 1, 0, 0, 0, inner.k)
-    return SciMLBase.build_solution(cache.prob, cache.alg,
+    return SciMLBase.build_solution(_inner_problem(cache.prob), cache.alg,
                                     inner.x, resid_vec;
                                     retcode = _to_sciml_retcode(inner.retcode),
                                     stats   = stats)

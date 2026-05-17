@@ -105,3 +105,32 @@ Default (observer): `nothing`.
 function on_event! end
 
 on_event!(::AbstractCallback, cache, event::Symbol) = nothing
+
+"""
+    ConstrainedNonlinearProblem(inner::NonlinearProblem, set::AbstractConstraintSet)
+    ConstrainedNonlinearProblem(f, u0, p = NullParameters();
+                                set::AbstractConstraintSet,
+                                lb = nothing, ub = nothing, kwargs...)
+
+Wraps a `SciMLBase.NonlinearProblem` with a feasibility set the algorithm
+must respect. The constraint becomes part of the *problem* (where it
+belongs), not the *algorithm* — so one `DFProjection` instance solves
+many problems with different feasibility sets.
+
+Use this for non-box constraints (`HalfSpace`, `CappedBox`, `Intersection`,
+`UserSet`). For pure box constraints, prefer `NonlinearProblem(f, u0;
+lb, ub)` directly — SciMLBase's native support.
+"""
+struct ConstrainedNonlinearProblem{P, S}
+    inner::P
+    set::S
+end
+
+function ConstrainedNonlinearProblem(f, u0::AbstractVector;
+                                       set,
+                                       p = SciMLBase.NullParameters(),
+                                       lb = nothing, ub = nothing,
+                                       kwargs...)
+    inner = SciMLBase.NonlinearProblem(f, u0, p; lb = lb, ub = ub, kwargs...)
+    return ConstrainedNonlinearProblem(inner, set)
+end

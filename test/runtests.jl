@@ -170,6 +170,93 @@ end
     # ========================================================================
 
     # ========================================================================
+    # v0.2 SciML alignment (constraint moves from algorithm to problem)
+    # ========================================================================
+
+    @testset "v0.2 SciML alignment (Stage 6)" begin
+        @testset "ConstrainedNonlinearProblem wraps a NonlinearProblem + set" begin
+            f(u, p) = copy(u)
+            inner = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            cprob = ConstrainedNonlinearProblem(inner, RealSpace())
+            @test cprob.inner === inner
+            @test cprob.set isa RealSpace
+        end
+
+        @testset "ConstrainedNonlinearProblem all-in-one constructor" begin
+            f(u, p) = copy(u)
+            cprob = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 1.0))
+            @test cprob.set isa HalfSpace
+            @test cprob.inner.u0 == [1.0, 1.0]
+        end
+
+        @testset "_constraint_set resolves from prob.lb/ub or wrapper" begin
+            f(u, p) = copy(u)
+            # Unconstrained: returns RealSpace
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            @test DFMethods._constraint_set(prob) isa RealSpace
+
+            # Box via lb/ub: returns BoxSet
+            prob_box = SciMLBase.NonlinearProblem(f, [1.0, 1.0]; lb = -ones(2), ub = ones(2))
+            set_box = DFMethods._constraint_set(prob_box)
+            @test set_box isa BoxSet
+            @test all(set_box.lower .== -1.0)
+            @test all(set_box.upper .== 1.0)
+
+            # ConstrainedNonlinearProblem: returns the wrapped set
+            cprob = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 1.0))
+            @test DFMethods._constraint_set(cprob) isa HalfSpace
+        end
+
+        @testset "DFProjection has no `set` field" begin
+            alg = DFProjection()
+            @test !hasfield(typeof(alg), :set)
+        end
+
+        @testset "Box constraints via prob.lb/ub solve correctly" begin
+            target = [0.3, -0.2]
+            f(u, p) = u .- target
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0]; lb = -ones(2), ub = ones(2))
+            sol = solve(prob, DFProjection(inertial = NoInertial()))
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test sol.u ≈ target atol = 1e-4
+        end
+
+        @testset "ConstrainedNonlinearProblem with HalfSpace solves" begin
+            f(u, p) = copy(u)
+            cprob = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 1.0))
+            sol = solve(cprob, DFProjection(inertial = NoInertial()))
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "One algorithm solves many problems" begin
+            # The whole point: alg is problem-agnostic, can be reused.
+            alg = DFProjection(direction = SpectralThreeTerm(),
+                                linesearch = ResidualNormBacktrack(),
+                                inertial = NoInertial())
+            f(u, p) = copy(u)
+
+            prob_unc = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            prob_box = SciMLBase.NonlinearProblem(f, [1.0, 1.0]; lb = -ones(2), ub = ones(2))
+            cprob_hs = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 0.5))
+
+            sol1 = solve(prob_unc, alg)
+            sol2 = solve(prob_box, alg)
+            sol3 = solve(cprob_hs, alg)
+            @test sol1.retcode == SciMLBase.ReturnCode.Success
+            @test sol2.retcode == SciMLBase.ReturnCode.Success
+            @test sol3.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "Cache holds the resolved set" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0]; lb = -ones(2), ub = ones(2))
+            scml_cache = init(prob, DFProjection())
+            inner = scml_cache.inner
+            @test inner.set isa BoxSet
+        end
+    end
+
+    # ========================================================================
     # v0.2 iterate update (Section A) — pluggable steps 6–7
     # ========================================================================
 
@@ -378,7 +465,6 @@ end
                 direction  = SpectralThreeTerm(),
                 linesearch = ConstantBacktrack(),
                 inertial   = NoInertial(),
-                set        = RealSpace(),
                 abstol     = 1e-6,
                 maxiters   = 500,
             )
@@ -389,15 +475,14 @@ end
             @test sol.stats.nf > 0
         end
 
-        @testset "Affine F with box: F(x) = x - target, target inside box" begin
+        @testset "Affine F with box (constraint via prob.lb/ub)" begin
             target = [0.3, -0.2]
             f(u, p) = u .- target
-            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0])
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0]; lb = -ones(2), ub = ones(2))
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
                 linesearch = ResidualNormBacktrack(),
                 inertial   = Inertial(0.25),
-                set        = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 abstol     = 1e-6,
                 maxiters   = 1000,
             )
@@ -406,15 +491,11 @@ end
             @test sol.u ≈ target atol=1e-4
         end
 
-        @testset "Infeasible x0 gets projected" begin
+        @testset "Infeasible x0 gets projected (init_cache with explicit set)" begin
             F = x -> copy(x)
             x0_infeas = [5.0, 5.0]      # outside [-1, 1]²
-            alg = DFProjection(;
-                set      = BoxSet([-1.0, -1.0], [1.0, 1.0]),
-                abstol   = 1e-6,
-                maxiters = 500,
-            )
-            cache = init_cache(F, x0_infeas, alg)
+            alg = DFProjection(; abstol = 1e-6, maxiters = 500)
+            cache = init_cache(F, x0_infeas, alg; set = BoxSet([-1.0, -1.0], [1.0, 1.0]))
             @test all(-1.0 .<= cache.x .<= 1.0)     # init projected x0 onto box
         end
 
@@ -423,7 +504,6 @@ end
             @test alg.direction  isa SpectralThreeTerm
             @test alg.linesearch isa ResidualNormBacktrack
             @test alg.inertial   isa Inertial
-            @test alg.set        isa RealSpace
             @test alg.abstol     == 1e-6
             @test alg.maxiters   == 2000
             @test alg.ζ          == 0.5
@@ -746,10 +826,10 @@ end
         @testset "end-to-end: RelResidualTol converges" begin
             F2(u, p) = u .- p
             target = [0.3, -0.2]
-            prob = SciMLBase.NonlinearProblem(F2, [1.0, -1.0], target)
+            prob = SciMLBase.NonlinearProblem(F2, [1.0, -1.0], target;
+                                              lb = -ones(2), ub = ones(2))
             alg = DFProjection(;
                 inertial = NoInertial(),
-                set      = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 stopping = AnyOf(RelResidualTol(1e-6; abstol = 1e-12), MaxIters(1000)),
             )
             sol = solve(prob, alg)
@@ -809,10 +889,10 @@ end
         @testset "Parameters p flow through: F(u,p) = u - p" begin
             f(u, p) = u .- p
             target = [0.3, -0.2]
-            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0], target)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0], target;
+                                              lb = -ones(2), ub = ones(2))
             sol = solve(prob, DFProjection(;
                 inertial = NoInertial(),
-                set      = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 maxiters = 1000,
             ))
             @test sol.retcode == SciMLBase.ReturnCode.Success
