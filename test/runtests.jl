@@ -3,6 +3,8 @@ using Test
 using LinearAlgebra
 using Random
 using SciMLBase
+using CommonSolve
+using LineSearch
 
 # Internal helpers — not part of the public API, but exercised by tests.
 using DFMethods: inertial_coef, apply_inertial!,
@@ -192,6 +194,82 @@ end
             @test 0 < α <= 1
             @test n_evals >= 1
             @test all(isfinite, F_z)
+        end
+    end
+
+    # ========================================================================
+    # v0.2 line searches (Section B) — LineSearch.jl-aligned
+    # ========================================================================
+
+    @testset "v0.2 line searches (Section B)" begin
+        @testset "Types are LineSearch.AbstractLineSearchAlgorithm subtypes" begin
+            @test ConstantBacktrack()         isa LineSearch.AbstractLineSearchAlgorithm
+            @test ResidualNormBacktrack()     isa LineSearch.AbstractLineSearchAlgorithm
+            @test AdaptiveClampedBacktrack()  isa LineSearch.AbstractLineSearchAlgorithm
+        end
+
+        @testset "ConstantBacktrack init + solve!" begin
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = -f(u, nothing)            # descent direction
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = ConstantBacktrack()
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            @test cache isa LineSearch.AbstractLineSearchCache
+
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol isa LineSearch.LineSearchSolution
+            @test 0 < sol.step_size <= 1
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+
+            # Our caches expose rich state for the outer step!
+            @test cache.n_evals >= 1
+            @test all(isfinite, cache.fu_cache)
+            @test all(isfinite, cache.z_cache)
+        end
+
+        @testset "ResidualNormBacktrack init + solve!" begin
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = -f(u, nothing)
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = ResidualNormBacktrack()
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test 0 < sol.step_size <= 1
+        end
+
+        @testset "AdaptiveClampedBacktrack init + solve!" begin
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = -f(u, nothing)
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = AdaptiveClampedBacktrack(lo = 0.5, Δ_init = 4.0)
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "Failure retcode when descent cannot be satisfied" begin
+            # Construct du anti-aligned with -F(z) so backtracking can't satisfy
+            # the Armijo condition within maxbt steps.
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = +f(u, nothing)            # NOT a descent direction
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = ConstantBacktrack(maxbt = 5)
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol.retcode == SciMLBase.ReturnCode.Failure
         end
     end
 

@@ -254,3 +254,193 @@ function linesearch!(rule::AbstractDFLineSearch,
     end
     return (α, Fz_buf, n_evals, false)
 end
+
+# ============================================================================
+# v0.2 line searches (Section B) — LineSearch.jl-aligned
+# ============================================================================
+#
+# Three concrete line searches that subtype `LineSearch.AbstractLineSearchAlgorithm`
+# and implement the standard `CommonSolve.init` / `CommonSolve.solve!` contract.
+# Differ only in the γ_k formula entering the Armijo-style descent test
+#
+#     -F(z)' du  ≥  σ · α · γ_k · ‖du‖²,    z = u + α·du
+#
+# Each algorithm has a matching cache that exposes `fu_cache` (F at the
+# accepted trial point) and `n_evals` so the DFProjection outer loop can
+# avoid a redundant F-evaluation per outer iteration.
+
+"""
+    ConstantBacktrack(; σ=0.01, ρ=0.6, maxbt=50)
+
+Backtracking line search with `γ_k ≡ 1` — Armijo's classical form.
+"""
+Base.@kwdef struct ConstantBacktrack <: LineSearch.AbstractLineSearchAlgorithm
+    σ::Float64     = 0.01
+    ρ::Float64     = 0.6
+    maxbt::Int     = 50
+end
+
+"""
+    ResidualNormBacktrack(; σ=0.01, ρ=0.6, maxbt=50)
+
+Backtracking with `γ_k = ‖F(z_k)‖`. Default line search for `DFProjection()`
+(empirical winner from the s30 benchmark for the SpectralThreeTerm direction).
+"""
+Base.@kwdef struct ResidualNormBacktrack <: LineSearch.AbstractLineSearchAlgorithm
+    σ::Float64     = 0.01
+    ρ::Float64     = 0.6
+    maxbt::Int     = 50
+end
+
+"""
+    AdaptiveClampedBacktrack(; σ=0.01, ρ=0.6, lo=1e-4, Δ_init=10.0, maxbt=50)
+
+Backtracking with `γ_k = clamp(‖F(z_k)‖, lo, lo + Δ)`. The `Δ` upper-bound
+range adapts across iterations (LSVII analog).
+"""
+Base.@kwdef struct AdaptiveClampedBacktrack <: LineSearch.AbstractLineSearchAlgorithm
+    σ::Float64     = 0.01
+    ρ::Float64     = 0.6
+    lo::Float64    = 1e-4
+    Δ_init::Float64 = 10.0
+    maxbt::Int     = 50
+end
+
+# ─── Cache types ────────────────────────────────────────────────────────────
+
+# All three caches share the same shape: a callable F closure, the
+# algorithm config, two scratch vectors (z_cache, fu_cache), and an eval
+# counter that the outer DFProjection loop reads.
+
+mutable struct ConstantBacktrackCache{F, Alg<:ConstantBacktrack} <: LineSearch.AbstractLineSearchCache
+    F::F
+    alg::Alg
+    z_cache::Vector{Float64}
+    fu_cache::Vector{Float64}
+    n_evals::Int
+end
+
+mutable struct ResidualNormBacktrackCache{F, Alg<:ResidualNormBacktrack} <: LineSearch.AbstractLineSearchCache
+    F::F
+    alg::Alg
+    z_cache::Vector{Float64}
+    fu_cache::Vector{Float64}
+    n_evals::Int
+end
+
+mutable struct AdaptiveClampedBacktrackCache{F, Alg<:AdaptiveClampedBacktrack} <: LineSearch.AbstractLineSearchCache
+    F::F
+    alg::Alg
+    z_cache::Vector{Float64}
+    fu_cache::Vector{Float64}
+    n_evals::Int
+    Δ::Float64                              # mutable; could adapt across solves
+end
+
+# Union over all DFMethods backtrack caches (for shared `_backtrack!`).
+const _AnyDFBacktrackCache = Union{ConstantBacktrackCache,
+                                    ResidualNormBacktrackCache,
+                                    AdaptiveClampedBacktrackCache}
+
+# ─── γ_k formula per cache ──────────────────────────────────────────────────
+
+_γ_k(::ConstantBacktrackCache,     fu) = 1.0
+_γ_k(::ResidualNormBacktrackCache, fu) = (s = 0.0; @inbounds for x in fu; s += x*x end; sqrt(s))
+function _γ_k(c::AdaptiveClampedBacktrackCache, fu)
+    s = 0.0
+    @inbounds for x in fu; s += x*x end
+    return clamp(sqrt(s), c.alg.lo, c.alg.lo + c.Δ)
+end
+
+# ─── F adapter: handle in-place vs out-of-place NonlinearProblem ────────────
+
+# Wraps the problem's f into a `(out, x) -> nothing` writer that fills `out`.
+# For out-of-place f(u, p), broadcasts the returned vector into out.
+function _wrap_F_into(prob::SciMLBase.NonlinearProblem)
+    f, p = prob.f, prob.p
+    if SciMLBase.isinplace(f)
+        return (out, x) -> (f(out, x, p); nothing)
+    else
+        return (out, x) -> (val = f(x, p); copyto!(out, val); nothing)
+    end
+end
+
+# ─── CommonSolve.init ───────────────────────────────────────────────────────
+
+function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
+                          alg::ConstantBacktrack, fu, u;
+                          stats=nothing, kwargs...)
+    F = _wrap_F_into(prob)
+    n = length(u)
+    return ConstantBacktrackCache(F, alg,
+                                   Vector{Float64}(undef, n),
+                                   Vector{Float64}(undef, n),
+                                   0)
+end
+
+function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
+                          alg::ResidualNormBacktrack, fu, u;
+                          stats=nothing, kwargs...)
+    F = _wrap_F_into(prob)
+    n = length(u)
+    return ResidualNormBacktrackCache(F, alg,
+                                       Vector{Float64}(undef, n),
+                                       Vector{Float64}(undef, n),
+                                       0)
+end
+
+function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
+                          alg::AdaptiveClampedBacktrack, fu, u;
+                          stats=nothing, kwargs...)
+    F = _wrap_F_into(prob)
+    n = length(u)
+    return AdaptiveClampedBacktrackCache(F, alg,
+                                          Vector{Float64}(undef, n),
+                                          Vector{Float64}(undef, n),
+                                          0, alg.Δ_init)
+end
+
+# ─── Shared backtracking driver ─────────────────────────────────────────────
+
+function _backtrack!(cache::_AnyDFBacktrackCache, u::AbstractVector, du::AbstractVector)
+    σ, ρ, maxbt = cache.alg.σ, cache.alg.ρ, cache.alg.maxbt
+    cache.n_evals = 0
+
+    # ‖du‖²
+    d_norm_sq = 0.0
+    @inbounds for j in eachindex(du)
+        d_norm_sq += du[j] * du[j]
+    end
+
+    α = 1.0
+    for _ in 0:maxbt
+        # z = u + α · du
+        @inbounds @simd for j in eachindex(u)
+            cache.z_cache[j] = u[j] + α * du[j]
+        end
+        # F(z) → fu_cache
+        cache.F(cache.fu_cache, cache.z_cache)
+        cache.n_evals += 1
+
+        # LHS = -F(z)' du
+        lhs = 0.0
+        @inbounds for j in eachindex(du)
+            lhs -= cache.fu_cache[j] * du[j]
+        end
+
+        γ   = _γ_k(cache, cache.fu_cache)
+        rhs = σ * α * γ * d_norm_sq
+
+        if lhs >= rhs
+            return LineSearch.LineSearchSolution(α, SciMLBase.ReturnCode.Success)
+        end
+        α *= ρ
+    end
+    return LineSearch.LineSearchSolution(α, SciMLBase.ReturnCode.Failure)
+end
+
+# ─── CommonSolve.solve! ─────────────────────────────────────────────────────
+
+CommonSolve.solve!(cache::ConstantBacktrackCache,        u, du) = _backtrack!(cache, u, du)
+CommonSolve.solve!(cache::ResidualNormBacktrackCache,    u, du) = _backtrack!(cache, u, du)
+CommonSolve.solve!(cache::AdaptiveClampedBacktrackCache, u, du) = _backtrack!(cache, u, du)

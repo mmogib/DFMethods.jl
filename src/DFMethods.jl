@@ -2,6 +2,8 @@ module DFMethods
 
 using LinearAlgebra
 using SciMLBase
+using CommonSolve
+using LineSearch
 
 # ── Includes (dependency order) ──────────────────────────────────────────────
 include("types.jl")                       # AbstractDFProjection + traits
@@ -33,10 +35,13 @@ export
     SpectralThreeTerm,
     direction!,
 
-    # line_searches.jl
+    # line_searches.jl (v0.1, will drop in 3c)
     AbstractDFLineSearch,
     LSI, LSII, LSIII, LSIV, LSV, LSVI, LSVII,
     gamma_k,
+
+    # line_searches.jl (v0.2, Section B — LineSearch.jl-aligned)
+    ConstantBacktrack, ResidualNormBacktrack, AdaptiveClampedBacktrack,
 
     # stopping_criteria.jl
     AbstractStoppingCriterion,
