@@ -80,17 +80,16 @@ DFProjection(;
 
 The defaults reproduce Ibrahim 2026's experimental setup with the LSII line search (best-performing variant in Tables 1–5 of the paper).
 
-## Convergence traits
+## Convergence assumptions
 
-Each algorithm declares its assumptions via three trait predicates:
+[`DFProjection`](@ref) requires:
 
-```julia
-monotonicity_required(::AbstractDFProjectionAlgorithm)::Bool
-pseudomonotonicity_sufficient(::AbstractDFProjectionAlgorithm)::Bool
-convex_set_required(::AbstractDFProjectionAlgorithm)::Bool
-```
+- $\psi$ continuous, with the abstract monotonicity-like condition $\psi(x)^\top (x - u^*) \geq 0 \ \forall x \in \mathbb{R}^n$ at any solution $u^*$ (this holds whenever $\psi$ is monotone or pseudo-monotone);
+- $X$ closed convex;
+- The chosen search direction satisfies sufficient descent and boundedness (Ibrahim 2026 eqs. 3–4);
+- The chosen line search's $\gamma_k$ is bounded below by a positive constant on bounded sets.
 
-[`DFProjection`](@ref) inherits the defaults (`true` for all three) from [`AbstractDFProjectionAlgorithm`](@ref). Future algorithms (e.g., non-Lipschitz variants from Ibrahim 2023) override these to widen their assumed scope.
+These are theoretical conditions for the convergence theorem (Ibrahim 2026 Thm 3.1). The library does not enforce them at runtime — algorithms iterate regardless and either converge or terminate via a stopping criterion. Validate your problem against the assumptions yourself; consult [Extending](@ref) for the convergence-caveats discussion (empirical example: sublinear behavior on degenerate-Jacobian problems).
 
 ## Reference
 

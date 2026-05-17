@@ -36,14 +36,6 @@ CommonSolve.step!(::DFMethods.DFSciMLCache)
 CommonSolve.solve!(::DFMethods.DFSciMLCache)
 ```
 
-## Assumption traits
-
-```@docs
-monotonicity_required
-pseudomonotonicity_sufficient
-convex_set_required
-```
-
 ## Search directions
 
 ```@docs

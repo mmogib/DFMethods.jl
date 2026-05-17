@@ -18,7 +18,6 @@ include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
 export
     # types.jl
     AbstractDFProjectionAlgorithm,
-    monotonicity_required, pseudomonotonicity_sufficient, convex_set_required,
 
     # constraint_sets.jl
     AbstractConstraintSet,

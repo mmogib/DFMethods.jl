@@ -8,9 +8,6 @@ using SciMLBase
 using DFMethods: inertial_coef, apply_inertial!,
                  linesearch!, approx_project_X_halfspace!
 
-# Dummy algorithm subtype for testing default assumption traits
-struct _DummyAlg <: AbstractDFProjectionAlgorithm end
-
 # Recorder direction for testing α_prev plumbing in `step!`. Captures the
 # α_prev value that `step!` passes through `ctx` to `direction!(d, rule, ctx)`.
 struct _RecorderDir <: AbstractSearchDirection end
@@ -22,17 +19,6 @@ function DFMethods.direction!(d, ::_RecorderDir, ctx)
 end
 
 @testset "DFMethods.jl" begin
-
-    # ========================================================================
-    # Assumption traits
-    # ========================================================================
-
-    @testset "Assumption traits (defaults)" begin
-        a = _DummyAlg()
-        @test monotonicity_required(a)        == true
-        @test pseudomonotonicity_sufficient(a) == true
-        @test convex_set_required(a)          == true
-    end
 
     # ========================================================================
     # Constraint sets

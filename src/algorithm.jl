@@ -82,8 +82,6 @@ function DFProjection(;
                         Float64(ζ), inner_maxiter, maxbt)
 end
 
-# Trait defaults from types.jl are inherited.
-
 # ============================================================================
 # DFProjectionCache: mutable state for one solve
 # ============================================================================
