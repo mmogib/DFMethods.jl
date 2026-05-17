@@ -13,7 +13,8 @@ include("search_directions.jl")           # AbstractSearchDirection + SpectralTh
 include("line_searches.jl")               # AbstractDFLineSearch + LSI..LSVII
 include("projection.jl")                  # Approximate projection onto X ∩ H_k
 include("iterate_updates.jl")             # AbstractIterateUpdate + Solodov–Svaiter / Direct / Halpern
-include("stopping_criteria.jl")           # AbstractStoppingCriterion + variants
+include("stopping_criteria.jl")           # AbstractStoppingCriterion + variants (callbacks)
+include("callbacks.jl")                   # HistoryCallback, LoggingCallback
 include("algorithm.jl")                   # DFProjection + cache + step!
 include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
 
@@ -44,13 +45,19 @@ export
     SolodovSvaiterProjection, DirectUpdate, HalpernUpdate,
     update_iterate!,
 
+    # types.jl (callback API)
+    AbstractCallback,
+    on_event!,
+
     # stopping_criteria.jl
     AbstractStoppingCriterion,
     AbsResidualTol, RelResidualTol,
     StepNormTol, DirectionNormTol,
     MaxIters, MaxTime, MaxFEvals,
     UserStop, AnyOf,
-    should_stop_at_w, should_stop_at_z, should_stop_at_end,
+
+    # callbacks.jl
+    HistoryCallback, LoggingCallback, HISTORY_FIELDS,
 
     # algorithm.jl
     DFProjection, DFProjectionCache,

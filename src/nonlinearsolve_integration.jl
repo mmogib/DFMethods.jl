@@ -151,6 +151,9 @@ function CommonSolve.solve!(cache::DFSciMLCache)
         inner.resid    = sqrt(s)
         inner.n_evals += 1
     end
+    # Fire :terminate (observers see final state; stopping criteria ignore).
+    _fire!(inner, cache.alg, :terminate)
+
     resid_vec = inner.F(inner.x)
     stats = SciMLBase.NLStats(inner.n_evals + 1, 0, 0, 0, inner.k)
     return SciMLBase.build_solution(cache.prob, cache.alg,

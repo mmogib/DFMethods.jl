@@ -50,7 +50,8 @@ struct DFProjection{Dir<:AbstractSearchDirection,
                     In<:AbstractInertialRule,
                     Set<:AbstractConstraintSet,
                     Stop<:AbstractStoppingCriterion,
-                    IU<:AbstractIterateUpdate} <: AbstractDFProjection
+                    IU<:AbstractIterateUpdate,
+                    CB<:Vector{<:AbstractCallback}} <: AbstractDFProjection
     direction::Dir
     linesearch::LS
     inertial::In
@@ -62,6 +63,7 @@ struct DFProjection{Dir<:AbstractSearchDirection,
     inner_maxiter::Int
     maxbt::Int
     iterate_update::IU
+    callbacks::CB
 end
 
 function DFProjection(;
@@ -76,6 +78,7 @@ function DFProjection(;
         inner_maxiter::Int = 500,
         maxbt::Int       = 50,
         iterate_update = SolodovSvaiterProjection(),
+        callbacks::Vector{<:AbstractCallback} = AbstractCallback[],
     )
     stop = stopping === nothing ?
         AnyOf(AbsResidualTol(Float64(abstol)), MaxIters(maxiters)) :
@@ -83,7 +86,7 @@ function DFProjection(;
     return DFProjection(direction, linesearch, inertial, set,
                         Float64(abstol), maxiters, stop,
                         Float64(ζ), inner_maxiter, maxbt,
-                        iterate_update)
+                        iterate_update, callbacks)
 end
 
 # ============================================================================
@@ -216,7 +219,7 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     prob_synth = SciMLBase.NonlinearProblem(f_2arg, x)
     line_search_cache = CommonSolve.init(prob_synth, alg.linesearch, Fx0, x)
 
-    return DFProjectionCache(
+    cache = DFProjectionCache(
         alg, F,
         x, x_prev, w, w_prev, z, d, d_prev,
         Fw, Fw_prev, Fz, x_new, scratch1,
@@ -231,6 +234,11 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
         time(),    # t_start
         1.0,       # α_prev (ignored at k=0; first line search overwrites)
     )
+
+    # Fire :initialize event before returning the cache.
+    _fire!(cache, alg, :initialize)
+
+    return cache
 end
 
 # ============================================================================
@@ -292,6 +300,21 @@ Perform one outer iteration of UIDFPAF. Updates `cache.x`, `cache.k`,
 function-value buffers, and sets `cache.done = true` on termination.
 Returns the cache (mutated).
 """
+# Fire `event` to all observers and the stopping criterion. Sets cache.done
+# if any stopping criterion fires.
+function _fire!(cache::DFProjectionCache, alg::DFProjection, event::Symbol)
+    @inbounds for cb in alg.callbacks
+        on_event!(cb, cache, event)
+    end
+    stopped, code = on_event!(alg.stopping, cache, event)
+    if stopped && !cache.done
+        cache.done      = true
+        cache.retcode   = code
+        cache.converged = (code === :Success)
+    end
+    return nothing
+end
+
 function step!(cache::DFProjectionCache)
     cache.done && return cache
 
@@ -309,20 +332,7 @@ function step!(cache::DFProjectionCache)
     end
     cache.n_evals += 1
 
-    # ── Step 3: stopping criteria after F(w_k) ───────────────────────────────
-    stopped, code = should_stop_at_w(alg.stopping, cache)
-    if stopped
-        copyto!(cache.x, cache.w)
-        cache.resid     = _norm2(cache.Fw)
-        cache.converged = (code === :Success)
-        cache.retcode   = code
-        cache.done      = true
-        return cache
-    end
-
-    # ── Step 4: search direction d_k ──────────────────────────────────────────
-    # Build a per-iteration context NamedTuple. Zero-allocation in practice
-    # (stack-allocated). Direction rules pull whichever fields they need.
+    # ── Step 3: search direction d_k ──────────────────────────────────────────
     ctx = (;
         Fw      = cache.Fw,
         Fw_prev = cache.Fw_prev,
@@ -334,41 +344,49 @@ function step!(cache::DFProjectionCache)
     )
     direction!(cache.d, alg.direction, ctx)
 
-    # ── Step 5: backtracking line search → α_k, z_k, F(z_k) ──────────────────
-    # LineSearch.jl-aligned: solve!(line_search_cache, u, du) -> LineSearchSolution.
-    # Our DFMethods caches expose z_cache, fu_cache, n_evals so we don't pay an
-    # extra F evaluation per outer iteration; for third-party LineSearch.jl
-    # algorithms (e.g. LiFukushimaLineSearch) we recompute Fz ourselves.
+    # ── Step 4: line search → α_k, z_k, F(z_k) ───────────────────────────────
     ls_sol = CommonSolve.solve!(cache.line_search_cache, cache.w, cache.d)
     α  = ls_sol.step_size
     ok = ls_sol.retcode === SciMLBase.ReturnCode.Success
     _harvest_linesearch_state!(cache, α)
 
     if !ok
-        # Line search failed — report best-effort residual at w_k
         cache.resid   = _norm2(cache.Fw)
         cache.retcode = :LineSearchFailed
         cache.done    = true
         return cache
     end
 
-    # ── Step 6: stopping criteria after F(z_k) (z_k ∈ X required for Success) ──
-    stopped, code = should_stop_at_z(alg.stopping, cache)
-    if stopped
-        if _is_feasible(cache.z, alg.set, cache.scratch1)
-            copyto!(cache.x, cache.z)
-            cache.resid     = _norm2(cache.Fz)
-            cache.converged = (code === :Success)
-            cache.retcode   = code
-            cache.done      = true
-            return cache
+    # ── Fire :post_linesearch (residual-based stopping checks fire here) ─────
+    _fire!(cache, alg, :post_linesearch)
+    if cache.done
+        # Stopping fired on cache.Fz — z is the converged point (if feasible)
+        if cache.retcode === :Success
+            if _is_feasible(cache.z, alg.set, cache.scratch1)
+                copyto!(cache.x, cache.z)
+                cache.resid = _norm2(cache.Fz)
+            else
+                # Infeasible z — back out the stop; let the iter proceed
+                cache.done      = false
+                cache.retcode   = :Default
+                cache.converged = false
+            end
+        else
+            # Non-Success stop (e.g., user-defined) — accept z if feasible,
+            # else accept current x.
+            if _is_feasible(cache.z, alg.set, cache.scratch1)
+                copyto!(cache.x, cache.z)
+                cache.resid = _norm2(cache.Fz)
+            else
+                cache.resid = _norm2(cache.Fw)
+            end
         end
+        cache.done && return cache
     end
 
-    # Degeneracy guard: applies to any iterate-update strategy that uses
-    # the F(z) value as a normalizing denominator (Solodov–Svaiter does
-    # via λ_k = F(z)'(w-z) / ‖F(z)‖²). Cheaper to check here once than
-    # to defend inside each strategy.
+    # Degeneracy guard: F(z) ≈ 0 but no stopping criterion claimed :Success.
+    # Without an explicit convergence tolerance pinned to this case, we have
+    # no λ_k to project — declare a degenerate residual.
     Fz_norm = _norm2(cache.Fz)
     if Fz_norm < eps()
         cache.resid   = Fz_norm
@@ -377,7 +395,7 @@ function step!(cache::DFProjectionCache)
         return cache
     end
 
-    # ── Steps 6–7: delegate to the iterate-update strategy ───────────────────
+    # ── Steps 5–6: delegate to the iterate-update strategy ───────────────────
     update_ctx = (; w     = cache.w,
                     d     = cache.d,
                     α     = α,
@@ -391,7 +409,7 @@ function step!(cache::DFProjectionCache)
                     state = cache.iterate_update_state)
     update_iterate!(cache.x_new, alg.iterate_update, update_ctx)
 
-    # ── Step 8: shift state for next iteration ────────────────────────────────
+    # ── Step 7: shift state for next iteration ────────────────────────────────
     copyto!(cache.x_prev,    cache.x)
     copyto!(cache.x,         cache.x_new)
     copyto!(cache.w_prev,    cache.w)
@@ -401,15 +419,10 @@ function step!(cache::DFProjectionCache)
 
     cache.k += 1
 
-    # ── Step 9: stopping criteria at end of iteration ─────────────────────────
-    stopped, code = should_stop_at_end(alg.stopping, cache)
-    if stopped
-        cache.converged = (code === :Success)
-        cache.retcode   = code
-        cache.done      = true
-        # resid is left as NaN for end-of-iter stops; the driver
-        # finalizes it with a single F(x_final) call after the loop.
-    end
+    # ── Fire :post_iter (iteration-budget + stall criteria fire here) ────────
+    _fire!(cache, alg, :post_iter)
+    # resid is left as NaN for end-of-iter stops; the driver finalizes it
+    # with a single F(x_final) call after the loop.
 
     return cache
 end

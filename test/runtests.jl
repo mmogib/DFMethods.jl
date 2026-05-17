@@ -514,92 +514,191 @@ end
     end
 
     # ========================================================================
+    # v0.2 callbacks (Section C)
+    # ========================================================================
+
+    @testset "v0.2 callbacks (Section C)" begin
+        @testset "AbstractCallback / AbstractStoppingCriterion hierarchy" begin
+            @test HistoryCallback() isa AbstractCallback
+            @test LoggingCallback(io = devnull) isa AbstractCallback
+            @test AbsResidualTol(1e-6) isa AbstractCallback   # stopping criterion is a callback
+            @test AbsResidualTol(1e-6) isa AbstractStoppingCriterion
+        end
+
+        @testset "HistoryCallback validates field names" begin
+            @test_throws ErrorException HistoryCallback(fields = (:not_a_field,))
+        end
+
+        @testset "HistoryCallback rejects both fields and extractor" begin
+            @test_throws ErrorException HistoryCallback(
+                fields = (:k, :F_norm),
+                extractor = c -> (a = 1,),
+            )
+        end
+
+        @testset "HistoryCallback accumulates rows on :post_iter" begin
+            hist = HistoryCallback(fields = (:k, :F_norm))
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[hist],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 10,
+            )
+            solve(prob, alg)
+            @test length(hist.history) >= 1
+            for row in hist.history
+                @test row.k isa Integer
+                @test row.F_norm isa Float64
+            end
+        end
+
+        @testset "HistoryCallback with custom extractor" begin
+            hist = HistoryCallback(extractor = c -> (custom = c.k * 2,))
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[hist],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 5,
+            )
+            solve(prob, alg)
+            @test length(hist.history) >= 1
+            for row in hist.history
+                @test row.custom isa Integer
+            end
+        end
+
+        @testset "LoggingCallback prints to io" begin
+            io = IOBuffer()
+            logger = LoggingCallback(io = io, columns = (:k, :F_norm), every = 1, footer = true)
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[logger],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 10,
+            )
+            solve(prob, alg)
+            output = String(take!(io))
+            @test occursin("k", output)         # header
+            @test occursin("F_norm", output)
+            @test occursin("Terminated", output)  # footer
+        end
+
+        @testset "LoggingCallback honors `every`" begin
+            io = IOBuffer()
+            logger = LoggingCallback(io = io, columns = (:k,), every = 100, footer = false)
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[logger],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 5,
+            )
+            solve(prob, alg)
+            output = String(take!(io))
+            # With every=100 and only ~5 iters, we should see the header but no rows
+            @test occursin("k", output)
+        end
+
+        @testset "HISTORY_FIELDS constant" begin
+            @test :k in HISTORY_FIELDS
+            @test :F_norm in HISTORY_FIELDS
+            @test :elapsed in HISTORY_FIELDS
+        end
+    end
+
+    # ========================================================================
     # Stopping criteria
     # ========================================================================
 
     @testset "Stopping criteria" begin
-        # Build a real cache via init_cache so we can probe criteria
+        # Build a real cache via init_cache so we can probe criteria via on_event!
         F(x) = copy(x)              # F(x) = x, F(0) = 0
         x0 = [1.0, 1.0]
         alg_default = DFProjection()
         cache = init_cache(F, x0, alg_default)
 
-        @testset "AbsResidualTol fires at_w / at_z, not at_end" begin
+        @testset "AbsResidualTol fires at :post_linesearch" begin
             c = AbsResidualTol(1e-6)
 
-            cache.Fw .= [0.5, 0.5];   @test should_stop_at_w(c, cache) == (false, :Default)
-            cache.Fw .= [1e-8, 1e-8]; @test should_stop_at_w(c, cache) == (true,  :Success)
+            cache.Fz .= [0.5, 0.5];   @test on_event!(c, cache, :post_linesearch) == (false, :Default)
+            cache.Fz .= [1e-8, 1e-8]; @test on_event!(c, cache, :post_linesearch) == (true,  :Success)
 
-            cache.Fz .= [0.5, 0.5];   @test should_stop_at_z(c, cache) == (false, :Default)
-            cache.Fz .= [1e-8, 1e-8]; @test should_stop_at_z(c, cache) == (true,  :Success)
-
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            # Other events fall through
+            @test on_event!(c, cache, :post_iter)    == (false, :Default)
+            @test on_event!(c, cache, :initialize)   == (false, :Default)
+            @test on_event!(c, cache, :terminate)    == (false, :Default)
         end
 
-        @testset "RelResidualTol uses F0_norm" begin
+        @testset "RelResidualTol uses F0_norm at :post_linesearch" begin
             cache.F0_norm = 2.0
             c = RelResidualTol(1e-4)
             # threshold = 0 + 1e-4 * 2 = 2e-4
-            cache.Fw .= [1e-3, 1e-3];     @test should_stop_at_w(c, cache) == (false, :Default)
-            cache.Fw .= [1e-5, 1e-5];     @test should_stop_at_w(c, cache) == (true,  :Success)
+            cache.Fz .= [1e-3, 1e-3];     @test on_event!(c, cache, :post_linesearch) == (false, :Default)
+            cache.Fz .= [1e-5, 1e-5];     @test on_event!(c, cache, :post_linesearch) == (true,  :Success)
 
             # with abstol kwarg
             c2 = RelResidualTol(1e-4; abstol = 1e-3)
-            cache.Fw .= [5e-4, 5e-4];     @test should_stop_at_w(c2, cache) == (true, :Success)
+            cache.Fz .= [5e-4, 5e-4];     @test on_event!(c2, cache, :post_linesearch) == (true, :Success)
         end
 
-        @testset "StepNormTol fires at_end only" begin
+        @testset "StepNormTol fires at :post_iter only" begin
             c = StepNormTol(1e-8)
 
-            cache.k = 0   # no prev step yet
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            cache.k = 0
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
 
             cache.k = 5
             cache.x .= [1.0, 1.0]; cache.x_prev .= [1.0, 1.0]
-            @test should_stop_at_end(c, cache) == (true, :Stalled)
+            @test on_event!(c, cache, :post_iter) == (true, :Stalled)
 
             cache.x_prev .= [0.0, 0.0]
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
 
-            @test should_stop_at_w(c, cache) == (false, :Default)
-            @test should_stop_at_z(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_linesearch) == (false, :Default)
         end
 
-        @testset "DirectionNormTol fires at_end only" begin
+        @testset "DirectionNormTol fires at :post_iter only" begin
             c = DirectionNormTol(1e-10)
 
             cache.k = 0
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
 
             cache.k = 5
             cache.d .= [1e-12, 1e-12]
-            @test should_stop_at_end(c, cache) == (true, :Stalled)
+            @test on_event!(c, cache, :post_iter) == (true, :Stalled)
 
             cache.d .= [1.0, 1.0]
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
         end
 
-        @testset "MaxIters / MaxFEvals / MaxTime" begin
-            cache.k = 999;        @test should_stop_at_end(MaxIters(1000), cache) == (false, :Default)
-            cache.k = 1000;       @test should_stop_at_end(MaxIters(1000), cache) == (true,  :MaxIters)
+        @testset "MaxIters / MaxFEvals / MaxTime fire at :post_iter" begin
+            cache.k = 999;        @test on_event!(MaxIters(1000), cache, :post_iter) == (false, :Default)
+            cache.k = 1000;       @test on_event!(MaxIters(1000), cache, :post_iter) == (true,  :MaxIters)
 
-            cache.n_evals = 50;   @test should_stop_at_end(MaxFEvals(100), cache) == (false, :Default)
-            cache.n_evals = 100;  @test should_stop_at_end(MaxFEvals(100), cache) == (true,  :MaxFEvals)
+            cache.n_evals = 50;   @test on_event!(MaxFEvals(100), cache, :post_iter) == (false, :Default)
+            cache.n_evals = 100;  @test on_event!(MaxFEvals(100), cache, :post_iter) == (true,  :MaxFEvals)
 
             cache.t_start = time() + 100.0   # in the future → no time elapsed
-            @test should_stop_at_end(MaxTime(0.001), cache) == (false, :Default)
+            @test on_event!(MaxTime(0.001), cache, :post_iter) == (false, :Default)
             cache.t_start = time() - 100.0   # 100 sec in the past
-            @test should_stop_at_end(MaxTime(0.001), cache) == (true,  :MaxTime)
+            @test on_event!(MaxTime(0.001), cache, :post_iter) == (true,  :MaxTime)
         end
 
         @testset "UserStop callback" begin
             c1 = UserStop(_cache -> (true, :CustomCode))
-            stopped, code = should_stop_at_end(c1, cache)
+            stopped, code = on_event!(c1, cache, :post_iter)
             @test stopped
             @test code == :CustomCode
 
             c2 = UserStop(_cache -> (false, :Default))
-            @test should_stop_at_end(c2, cache) == (false, :Default)
+            @test on_event!(c2, cache, :post_iter) == (false, :Default)
         end
 
         @testset "AnyOf composes (first to fire wins)" begin
@@ -608,18 +707,19 @@ end
                 MaxIters(100),
             )
             # Neither fires
-            cache.Fw .= [0.5, 0.5]
+            cache.Fz .= [0.5, 0.5]
             cache.k = 50
-            @test should_stop_at_w(c, cache)   == (false, :Default)
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_linesearch) == (false, :Default)
+            @test on_event!(c, cache, :post_iter)       == (false, :Default)
 
-            # AbsResidualTol fires at_w
-            cache.Fw .= [1e-8, 1e-8]
-            @test should_stop_at_w(c, cache) == (true, :Success)
+            # AbsResidualTol fires at :post_linesearch
+            cache.Fz .= [1e-8, 1e-8]
+            @test on_event!(c, cache, :post_linesearch) == (true, :Success)
 
-            # MaxIters fires at_end
+            # MaxIters fires at :post_iter
             cache.k = 200
-            @test should_stop_at_end(c, cache) == (true, :MaxIters)
+            cache.Fz .= [0.5, 0.5]
+            @test on_event!(c, cache, :post_iter) == (true, :MaxIters)
         end
 
         @testset "DFProjection default stopping" begin

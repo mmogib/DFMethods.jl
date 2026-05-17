@@ -63,6 +63,16 @@ inertial_coef
 apply_inertial!
 ```
 
+## Callbacks
+
+```@docs
+AbstractCallback
+on_event!
+HistoryCallback
+LoggingCallback
+HISTORY_FIELDS
+```
+
 ## Stopping criteria
 
 ```@docs
@@ -76,9 +86,6 @@ MaxTime
 MaxFEvals
 UserStop
 AnyOf
-should_stop_at_w
-should_stop_at_z
-should_stop_at_end
 ```
 
 ## Constraint sets and projections

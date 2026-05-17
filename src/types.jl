@@ -65,3 +65,43 @@ In-place: write the next iterate into `x_new` per `rule`'s logic.
 `k`, `ζ`, `inner_maxiter`, `state`. See [`AbstractIterateUpdate`](@ref).
 """
 function update_iterate! end
+
+"""
+    AbstractCallback
+
+Supertype for solve-time callbacks. Implement
+`on_event!(cb, cache, event::Symbol)` to observe state at specific
+lifecycle events. Default behavior: observe-only (return `nothing`).
+
+Stopping criteria are a special case — see [`AbstractStoppingCriterion`](@ref),
+which subtypes `AbstractCallback` and returns `(stopped::Bool, retcode::Symbol)`
+from `on_event!` to signal termination.
+
+Events fired in v0.2:
+
+| Event | Where it fires |
+|---|---|
+| `:initialize` | Once, at end of `init_cache` |
+| `:post_linesearch` | After the line search; `cache.Fz` is fresh |
+| `:post_iter` | After the state shift; `cache.k` incremented |
+| `:terminate` | Once, on any termination |
+
+The minimal 4-event set is intentional. More events (`:pre_iter`,
+`:post_direction`, `:post_iterate_update`) may be added in a future
+release if real need emerges.
+"""
+abstract type AbstractCallback end
+
+"""
+    on_event!(cb, cache, event::Symbol)
+
+Called by the algorithm at each instrumented lifecycle event. For
+`AbstractCallback` subtypes that observe only (e.g. `HistoryCallback`,
+`LoggingCallback`), return value is ignored. For
+`AbstractStoppingCriterion` subtypes, return `(stopped::Bool, retcode::Symbol)`.
+
+Default (observer): `nothing`.
+"""
+function on_event! end
+
+on_event!(::AbstractCallback, cache, event::Symbol) = nothing

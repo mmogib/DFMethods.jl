@@ -1,93 +1,57 @@
-# stopping_criteria.jl — Pluggable stopping criteria for `DFProjection`.
+# stopping_criteria.jl — Stopping criteria as callback subtypes.
 #
-# Three check points per outer iteration of `step!`:
-#   - at_w:   after F(w_k) is computed
-#   - at_z:   after the trial point z_k and F(z_k) are computed
-#   - at_end: after the projection step → x_{k+1}
+# Each concrete criterion subtypes `AbstractStoppingCriterion <: AbstractCallback`
+# and implements `on_event!(crit, cache, event::Symbol) -> (Bool, Symbol)`.
+# At the events the criterion cares about, it returns `(true, :Retcode)` to
+# signal termination; otherwise `(false, :Default)`.
 #
-# Each concrete criterion overrides only the check points it cares about;
-# the others fall back to a `(false, :Default)` no-op. Composite via `AnyOf`.
+# v0.2 event set: `:initialize`, `:post_linesearch`, `:post_iter`, `:terminate`.
+# Residual-based criteria fire at :post_linesearch (cache.Fz is fresh, before
+# the projection step); iteration-budget criteria fire at :post_iter (cache.k
+# is incremented).
 
 """
-    AbstractStoppingCriterion
+    AbstractStoppingCriterion <: AbstractCallback
 
-Supertype for stopping criteria. Concrete subtypes implement any subset of:
+Supertype for stopping criteria. Concrete subtypes implement
+`on_event!(crit, cache, event::Symbol) -> (Bool, Symbol)` for the events
+they care about.
 
-```julia
-should_stop_at_w(crit, cache)   -> (Bool, Symbol)   # after F(w_k) eval
-should_stop_at_z(crit, cache)   -> (Bool, Symbol)   # after F(z_k) eval
-should_stop_at_end(crit, cache) -> (Bool, Symbol)   # after projection → x_{k+1}
-```
-
-The `Symbol` is the `retcode` (`:Success`, `:Stalled`, `:MaxIters`,
-`:MaxTime`, `:MaxFEvals`, `:UserStop`, or any user-defined code).
+The default fallback returns `(false, :Default)` — i.e., never stops.
+Concrete criteria override `on_event!` for their relevant event(s).
 """
-abstract type AbstractStoppingCriterion end
+abstract type AbstractStoppingCriterion <: AbstractCallback end
 
-# Default: stopping criteria are stateless (see init_state contract in types.jl).
+# Stateless by default.
 init_state(::AbstractStoppingCriterion, prob, x0, alg) = nothing
 
-"""
-    should_stop_at_w(crit, cache) -> (Bool, Symbol)
-
-Check whether the criterion fires immediately after evaluating
-``\\psi(w_k)`` (right after the inertial extrapolation). Returns a
-`(stopped, retcode)` tuple. The default for `AbstractStoppingCriterion`
-is `(false, :Default)`; concrete criteria override only the dispatch
-points they care about.
-"""
-function should_stop_at_w end
-
-"""
-    should_stop_at_z(crit, cache) -> (Bool, Symbol)
-
-Check whether the criterion fires after evaluating ``\\psi(z_k)`` at the
-trial point ``z_k = w_k + \\alpha_k d_k`` (post line search). A `:Success`
-here is only accepted by the algorithm if ``z_k \\in X``.
-"""
-function should_stop_at_z end
-
-"""
-    should_stop_at_end(crit, cache) -> (Bool, Symbol)
-
-Check whether the criterion fires after the projection step has produced
-``x_{k+1}`` (end of iteration). Suitable for iteration-count (`MaxIters`),
-wall-clock (`MaxTime`), and step-norm (`StepNormTol`) criteria.
-"""
-function should_stop_at_end end
-
-# Default fall-throughs — concrete criteria override the points they care about.
-should_stop_at_w(::AbstractStoppingCriterion, cache)   = (false, :Default)
-should_stop_at_z(::AbstractStoppingCriterion, cache)   = (false, :Default)
-should_stop_at_end(::AbstractStoppingCriterion, cache) = (false, :Default)
+# Default: never stops. Concrete criteria override.
+on_event!(::AbstractStoppingCriterion, cache, event::Symbol) = (false, :Default)
 
 # ============================================================================
-# Residual-based criteria (fire after F(w_k) and F(z_k) evals)
+# Residual-based criteria (fire at :post_linesearch on cache.Fz)
 # ============================================================================
 
 """
     AbsResidualTol(abstol)
 
-Stop when ``\\|\\psi(\\cdot)\\| \\le \\text{abstol}`` at either w_k or z_k.
+Stop when ``\\|F(z_k)\\| \\le \\text{abstol}`` (post line search).
 Retcode `:Success`.
 """
 struct AbsResidualTol <: AbstractStoppingCriterion
     abstol::Float64
 end
 
-function should_stop_at_w(c::AbsResidualTol, cache)
-    return norm(cache.Fw) <= c.abstol ? (true, :Success) : (false, :Default)
-end
-
-function should_stop_at_z(c::AbsResidualTol, cache)
+function on_event!(c::AbsResidualTol, cache, event::Symbol)
+    event === :post_linesearch || return (false, :Default)
     return norm(cache.Fz) <= c.abstol ? (true, :Success) : (false, :Default)
 end
 
 """
     RelResidualTol(rtol; abstol=0)
 
-Stop when ``\\|\\psi(\\cdot)\\| \\le \\text{abstol} + \\text{rtol} \\cdot \\|\\psi(x_0)\\|``.
-Matches the Dai 2015 / Ibrahim 2026 stopping convention. Retcode `:Success`.
+Stop when ``\\|F(z_k)\\| \\le \\text{abstol} + \\text{rtol} \\cdot \\|F(x_0)\\|``
+(post line search). Retcode `:Success`.
 """
 struct RelResidualTol <: AbstractStoppingCriterion
     rtol::Float64
@@ -97,31 +61,28 @@ end
 RelResidualTol(rtol::Real; abstol::Real = 0.0) =
     RelResidualTol(Float64(rtol), Float64(abstol))
 
-function should_stop_at_w(c::RelResidualTol, cache)
-    threshold = c.abstol + c.rtol * cache.F0_norm
-    return norm(cache.Fw) <= threshold ? (true, :Success) : (false, :Default)
-end
-
-function should_stop_at_z(c::RelResidualTol, cache)
+function on_event!(c::RelResidualTol, cache, event::Symbol)
+    event === :post_linesearch || return (false, :Default)
     threshold = c.abstol + c.rtol * cache.F0_norm
     return norm(cache.Fz) <= threshold ? (true, :Success) : (false, :Default)
 end
 
 # ============================================================================
-# Stall detectors (fire at end-of-iter)
+# Stall detectors (fire at :post_iter)
 # ============================================================================
 
 """
     StepNormTol(xtol)
 
-Stop when ``\\|x_k - x_{k-1}\\| \\le \\text{xtol}`` at the end of an
-iteration. Catches stalls without waiting for `MaxIters`. Retcode `:Stalled`.
+Stop when ``\\|x_k - x_{k-1}\\| \\le \\text{xtol}`` at end of iteration.
+Catches stalls. Retcode `:Stalled`.
 """
 struct StepNormTol <: AbstractStoppingCriterion
     xtol::Float64
 end
 
-function should_stop_at_end(c::StepNormTol, cache)
+function on_event!(c::StepNormTol, cache, event::Symbol)
+    event === :post_iter || return (false, :Default)
     cache.k <= 1 && return (false, :Default)   # need both x_k and x_{k-1}
     s = 0.0
     @inbounds for i in eachindex(cache.x)
@@ -133,19 +94,17 @@ end
 """
     DirectionNormTol(dtol)
 
-Stop when ``\\|d_k\\| \\le \\text{dtol}`` at the end of an iteration.
-Retcode `:Stalled`.
-
-A vanishing direction near convergence is not the same as a vanishing
-residual — pair this with `AbsResidualTol` (via `AnyOf`) for a complete
-picture.
+Stop when ``\\|d_k\\| \\le \\text{dtol}``. Retcode `:Stalled`.
+Pair with `AbsResidualTol` (via `AnyOf`) for a complete picture —
+a vanishing direction is not the same as a vanishing residual.
 """
 struct DirectionNormTol <: AbstractStoppingCriterion
     dtol::Float64
 end
 
-function should_stop_at_end(c::DirectionNormTol, cache)
-    cache.k == 0 && return (false, :Default)   # d may be uninitialized
+function on_event!(c::DirectionNormTol, cache, event::Symbol)
+    event === :post_iter || return (false, :Default)
+    cache.k == 0 && return (false, :Default)
     s = 0.0
     @inbounds for i in eachindex(cache.d)
         s += abs2(cache.d[i])
@@ -154,7 +113,7 @@ function should_stop_at_end(c::DirectionNormTol, cache)
 end
 
 # ============================================================================
-# Budget criteria (fire at end-of-iter)
+# Budget criteria (fire at :post_iter)
 # ============================================================================
 
 """
@@ -166,21 +125,22 @@ struct MaxIters <: AbstractStoppingCriterion
     maxiters::Int
 end
 
-function should_stop_at_end(c::MaxIters, cache)
+function on_event!(c::MaxIters, cache, event::Symbol)
+    event === :post_iter || return (false, :Default)
     return cache.k >= c.maxiters ? (true, :MaxIters) : (false, :Default)
 end
 
 """
     MaxTime(maxtime)
 
-Stop when elapsed wall-clock time exceeds `maxtime` seconds. Retcode
-`:MaxTime`. The reference epoch is `cache.t_start`, set in `init_cache`.
+Stop when elapsed wall-clock time exceeds `maxtime` seconds. Retcode `:MaxTime`.
 """
 struct MaxTime <: AbstractStoppingCriterion
     maxtime::Float64
 end
 
-function should_stop_at_end(c::MaxTime, cache)
+function on_event!(c::MaxTime, cache, event::Symbol)
+    event === :post_iter || return (false, :Default)
     return (time() - cache.t_start) > c.maxtime ? (true, :MaxTime) : (false, :Default)
 end
 
@@ -193,7 +153,8 @@ struct MaxFEvals <: AbstractStoppingCriterion
     maxevals::Int
 end
 
-function should_stop_at_end(c::MaxFEvals, cache)
+function on_event!(c::MaxFEvals, cache, event::Symbol)
+    event === :post_iter || return (false, :Default)
     return cache.n_evals >= c.maxevals ? (true, :MaxFEvals) : (false, :Default)
 end
 
@@ -205,16 +166,14 @@ end
     UserStop(f)
 
 User-supplied predicate. `f(cache) -> (stopped::Bool, retcode::Symbol)`.
-Called at end-of-iteration. Use for domain-specific criteria — e.g.,
-stopping when an application-level metric crosses a threshold, or when
-``\\|\\psi(x_k)\\|`` itself drops (which would require evaluating `f` at
-`cache.x` inside the callback — an extra `F` call per iteration).
+Called at `:post_iter` by default.
 """
 struct UserStop{F} <: AbstractStoppingCriterion
     f::F
 end
 
-function should_stop_at_end(c::UserStop, cache)
+function on_event!(c::UserStop, cache, event::Symbol)
+    event === :post_iter || return (false, :Default)
     return c.f(cache)
 end
 
@@ -225,18 +184,9 @@ end
 """
     AnyOf(criteria...)
 
-Composite criterion: stops when any constituent stops. Checked in
-declaration order at each check point; the first to fire wins and its
-retcode propagates.
-
-```julia
-stopping = AnyOf(
-    RelResidualTol(1e-8; abstol = 1e-12),
-    StepNormTol(1e-10),
-    MaxIters(5000),
-    MaxTime(60.0),
-)
-```
+Composite criterion: stops when any constituent stops. Delegates each
+event to all sub-criteria in declaration order; the first to fire wins
+and its retcode propagates.
 """
 struct AnyOf{T<:Tuple} <: AbstractStoppingCriterion
     criteria::T
@@ -244,29 +194,9 @@ end
 
 AnyOf(criteria...) = AnyOf(criteria)
 
-function should_stop_at_w(c::AnyOf, cache)
+function on_event!(c::AnyOf, cache, event::Symbol)
     for crit in c.criteria
-        stopped, code = should_stop_at_w(crit, cache)
-        if stopped
-            return (true, code)
-        end
-    end
-    return (false, :Default)
-end
-
-function should_stop_at_z(c::AnyOf, cache)
-    for crit in c.criteria
-        stopped, code = should_stop_at_z(crit, cache)
-        if stopped
-            return (true, code)
-        end
-    end
-    return (false, :Default)
-end
-
-function should_stop_at_end(c::AnyOf, cache)
-    for crit in c.criteria
-        stopped, code = should_stop_at_end(crit, cache)
+        stopped, code = on_event!(crit, cache, event)
         if stopped
             return (true, code)
         end
