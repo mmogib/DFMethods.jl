@@ -41,6 +41,9 @@ the rule author's responsibility to ensure these hold.
 """
 abstract type AbstractSearchDirection end
 
+# Default: direction rules are stateless (see init_state contract in types.jl).
+init_state(::AbstractSearchDirection, prob, x0, alg) = nothing
+
 # ============================================================================
 # SpectralThreeTerm: Spectral Three-Term Derivative-Free Projection Method
 # (Ibrahim 2026 eq. on p. 4 / based on ref [12])

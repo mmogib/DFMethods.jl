@@ -87,29 +87,36 @@ end
 # ============================================================================
 
 """
-    DFProjectionCache
+    DFProjectionCache{Alg, F, DirState, LSCache, IUpState, StopState}
 
 Mutable per-solve state. Created via `init_cache(F, x0, alg)`. All
 per-iteration buffers are pre-allocated; `step!` does not allocate.
 
-State fields:
+# Common state (vectors)
 - `x`, `x_prev`, `w`, `w_prev`, `z`, `d`, `d_prev` — iteration vectors.
 - `Fw`, `Fw_prev`, `Fz` — function values.
-- `x_new`, `proj_target` — buffers for the projection step.
-- `proj_p`, `proj_q`, `proj_scratch`, `proj_out_prev` — Dykstra inner buffers.
+- `x_new`, `scratch1` — generic scratch.
+
+# Pluggable component state (typed via parameters)
+- `direction_state::DirState` — `init_state(alg.direction, ...)`. Default `nothing`.
+- `line_search_cache::LSCache` — populated by the line-search component. Default `nothing` (Stage 2 transition state; filled by Stage 3 once LineSearch.jl is adopted).
+- `iterate_update_state::IUpState` — `init_state(...)` for the iterate-update strategy. In Stage 2 this is always a `SolodovSvaiterState` (holding the projection scratch and Dykstra buffers).
+- `stopping_state::StopState` — `init_state(alg.stopping, ...)`. Default `nothing`.
+
+# Common scalars
 - `k::Int` — iteration counter (0-based).
 - `n_evals::Int` — total F evaluations.
-- `converged::Bool` — true on successful early-stop.
-- `done::Bool` — true once the driver should exit the loop.
-- `retcode::Symbol` — `:Default`, `:Success`, `:MaxIters`, `:LineSearchFailed`,
-  `:DegenerateResidual`.
-- `resid::Float64` — final ‖F‖ at the returned iterate (`NaN` until set).
+- `converged::Bool`, `done::Bool`, `retcode::Symbol`, `resid::Float64`.
+- `F0_norm::Float64` — `‖F(x_0)‖`, used by `RelResidualTol`.
+- `t_start::Float64` — wall-clock seconds at solve start (for `MaxTime`).
+- `α_prev::Float64` — previous line-search step size, surfaced to `direction!` via `ctx.α_prev`.
 """
-mutable struct DFProjectionCache{Alg<:DFProjection, F}
+mutable struct DFProjectionCache{Alg<:DFProjection, F,
+                                  DirState, LSCache, IUpState, StopState}
     alg::Alg
     F::F
 
-    # State vectors
+    # Common per-iteration state
     x::Vector{Float64}
     x_prev::Vector{Float64}
     w::Vector{Float64}
@@ -121,16 +128,13 @@ mutable struct DFProjectionCache{Alg<:DFProjection, F}
     Fw_prev::Vector{Float64}
     Fz::Vector{Float64}
     x_new::Vector{Float64}
-    proj_target::Vector{Float64}
-
-    # Projection inner buffers
-    proj_p::Vector{Float64}
-    proj_q::Vector{Float64}
-    proj_scratch::Vector{Float64}
-    proj_out_prev::Vector{Float64}
-
-    # Generic scratch
     scratch1::Vector{Float64}
+
+    # Pluggable component state — typed via parameters
+    direction_state::DirState
+    line_search_cache::LSCache
+    iterate_update_state::IUpState
+    stopping_state::StopState
 
     # State scalars
     k::Int
@@ -140,16 +144,16 @@ mutable struct DFProjectionCache{Alg<:DFProjection, F}
     retcode::Symbol
     resid::Float64
 
-    # Stopping-criterion state
-    F0_norm::Float64        # ‖F(x_0)‖, set by `init_cache` (for RelResidualTol)
-    t_start::Float64        # wall-clock seconds at solve start (for MaxTime)
-
-    # Previous line-search step size α_{k-1}. Surfaced to `direction!` via
-    # the `ctx.α_prev` field (see `search_directions.jl`). Initialized to
-    # 1.0 by `init_cache`; updated by `step!` after each successful line
-    # search. Used by directions whose update rule depends on the previous
-    # step displacement s_{k-1} = α_{k-1} · d_{k-1} (e.g. GMOPCGM).
+    F0_norm::Float64
+    t_start::Float64
     α_prev::Float64
+end
+
+# Custom show — avoids dumping the long parametric type signature.
+function Base.show(io::IO, cache::DFProjectionCache)
+    n = length(cache.x)
+    print(io, "DFProjectionCache(n=", n, ", k=", cache.k,
+              ", retcode=:", cache.retcode, ")")
 end
 
 # ============================================================================
@@ -180,12 +184,17 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     Fw_prev = zeros(n)
     Fz      = zeros(n)
     x_new   = similar(x)
-    proj_target   = similar(x)
-    proj_p        = zeros(n)
-    proj_q        = zeros(n)
-    proj_scratch  = similar(x)
-    proj_out_prev = similar(x)
-    scratch1      = similar(x)
+    scratch1 = similar(x)
+
+    # Pluggable component state. Stage 2: line_search_cache and the iterate
+    # update strategy slot are still hardcoded (LineSearch.jl adopted in
+    # Stage 3; AbstractIterateUpdate added in Stage 4). Direction and stopping
+    # use init_state with `nothing` as the placeholder for `prob` since neither
+    # default reads it; Stage 3+ will pass the NonlinearProblem when available.
+    dir_state            = init_state(alg.direction, nothing, x0, alg)
+    line_search_cache    = nothing
+    iterate_update_state = SolodovSvaiterState(n)
+    stopping_state       = init_state(alg.stopping, nothing, x0, alg)
 
     # One initial F-eval for F0_norm (used by `RelResidualTol`).
     Fx0 = F(x)
@@ -198,17 +207,15 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection)
     return DFProjectionCache(
         alg, F,
         x, x_prev, w, w_prev, z, d, d_prev,
-        Fw, Fw_prev, Fz,
-        x_new, proj_target,
-        proj_p, proj_q, proj_scratch, proj_out_prev,
-        scratch1,
+        Fw, Fw_prev, Fz, x_new, scratch1,
+        dir_state, line_search_cache, iterate_update_state, stopping_state,
         0,         # k
         1,         # n_evals (the F(x_0) eval just done)
         false,     # converged
         false,     # done
         :Default,  # retcode
         NaN,       # resid
-        F0_norm,   # F0_norm
+        F0_norm,
         time(),    # t_start
         1.0,       # α_prev (ignored at k=0; first line search overwrites)
     )
@@ -339,20 +346,22 @@ function step!(cache::DFProjectionCache)
     end
     λ = inner_wz / Fz_norm_sq
 
+    ss = cache.iterate_update_state   # SolodovSvaiterState
+
     # target = w_k - λ Fz
     @inbounds @simd for i in eachindex(cache.w)
-        cache.proj_target[i] = cache.w[i] - λ * cache.Fz[i]
+        ss.proj_target[i] = cache.w[i] - λ * cache.Fz[i]
     end
 
     # ε_k = (ζ²/2) ‖λ Fz‖² = (ζ²/2) λ² ‖Fz‖²
     ε_k = 0.5 * alg.ζ^2 * λ * λ * Fz_norm_sq
 
     # Project onto X ∩ H_k
-    approx_project_X_halfspace!(cache.x_new, cache.proj_target,
+    approx_project_X_halfspace!(cache.x_new, ss.proj_target,
                                 alg.set,
                                 cache.Fz, inner_Fz_z, ε_k,
-                                cache.proj_p, cache.proj_q,
-                                cache.proj_scratch, cache.proj_out_prev;
+                                ss.proj_p, ss.proj_q,
+                                ss.proj_scratch, ss.proj_out_prev;
                                 maxiter = alg.inner_maxiter)
 
     # ── Step 8: shift state for next iteration ────────────────────────────────

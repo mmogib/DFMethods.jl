@@ -298,6 +298,51 @@ end
             @test alg.ζ          == 0.5
         end
 
+        @testset "v0.2 cache shape (Section D)" begin
+            F = x -> copy(x)
+            x0 = [1.0, 1.0]
+            alg = DFProjection()
+            cache = init_cache(F, x0, alg)
+
+            # Four pluggable component-state slots
+            @test hasfield(typeof(cache), :direction_state)
+            @test hasfield(typeof(cache), :line_search_cache)
+            @test hasfield(typeof(cache), :iterate_update_state)
+            @test hasfield(typeof(cache), :stopping_state)
+
+            # In Stage 2: direction / line_search / stopping default to nothing;
+            # iterate_update_state holds the projection scratch
+            @test cache.direction_state === nothing
+            @test cache.line_search_cache === nothing
+            @test cache.stopping_state === nothing
+            @test cache.iterate_update_state isa DFMethods.SolodovSvaiterState
+            @test length(cache.iterate_update_state.proj_target) == length(x0)
+
+            # Old direct fields gone
+            @test !hasfield(typeof(cache), :proj_target)
+            @test !hasfield(typeof(cache), :proj_p)
+            @test !hasfield(typeof(cache), :proj_q)
+            @test !hasfield(typeof(cache), :proj_scratch)
+            @test !hasfield(typeof(cache), :proj_out_prev)
+        end
+
+        @testset "init_state defaults to nothing" begin
+            f(u, p) = copy(u)
+            x0 = [1.0]; alg = DFProjection()
+            prob = SciMLBase.NonlinearProblem(f, x0)
+            @test DFMethods.init_state(SpectralThreeTerm(), prob, x0, alg) === nothing
+            @test DFMethods.init_state(MaxIters(100), prob, x0, alg) === nothing
+        end
+
+        @testset "Base.show DFProjectionCache prints a one-liner" begin
+            F = x -> copy(x); x0 = [1.0]; alg = DFProjection()
+            cache = init_cache(F, x0, alg)
+            s = sprint(show, cache)
+            @test occursin("DFProjectionCache", s)
+            # The long parametric type signature shouldn't dominate
+            @test length(s) < 200
+        end
+
         @testset "α_prev plumbing through ctx" begin
             # Uses _RecorderDir + _RECORDED_ALPHA_PREV defined at top of file.
             # Exercises the full SciML path: NonlinearProblem → init → step!.

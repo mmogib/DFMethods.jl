@@ -24,6 +24,9 @@ The `Symbol` is the `retcode` (`:Success`, `:Stalled`, `:MaxIters`,
 """
 abstract type AbstractStoppingCriterion end
 
+# Default: stopping criteria are stateless (see init_state contract in types.jl).
+init_state(::AbstractStoppingCriterion, prob, x0, alg) = nothing
+
 """
     should_stop_at_w(crit, cache) -> (Bool, Symbol)
 
