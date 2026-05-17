@@ -4,7 +4,7 @@ using LinearAlgebra
 using SciMLBase
 
 # ── Includes (dependency order) ──────────────────────────────────────────────
-include("types.jl")                       # AbstractDFProjectionAlgorithm + traits
+include("types.jl")                       # AbstractDFProjection + traits
 include("constraint_sets.jl")             # Sets + exact projections
 include("inertial.jl")                    # Inertial extrapolation rules
 include("search_directions.jl")           # AbstractSearchDirection + SpectralThreeTerm
@@ -17,7 +17,7 @@ include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
 # ── Exports ──────────────────────────────────────────────────────────────────
 export
     # types.jl
-    AbstractDFProjectionAlgorithm,
+    AbstractDFProjection,
 
     # constraint_sets.jl
     AbstractConstraintSet,

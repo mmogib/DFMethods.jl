@@ -49,7 +49,7 @@ struct DFProjection{Dir<:AbstractSearchDirection,
                     LS<:AbstractDFLineSearch,
                     In<:AbstractInertialRule,
                     Set<:AbstractConstraintSet,
-                    Stop<:AbstractStoppingCriterion} <: AbstractDFProjectionAlgorithm
+                    Stop<:AbstractStoppingCriterion} <: AbstractDFProjection
     direction::Dir
     linesearch::LS
     inertial::In

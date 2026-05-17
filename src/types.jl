@@ -1,7 +1,7 @@
 # types.jl — Abstract algorithm supertype.
 
 """
-    AbstractDFProjectionAlgorithm
+    AbstractDFProjection
 
 Supertype for all derivative-free projection algorithms in DFMethods.
 Concrete subtypes (e.g., `DFProjection` in `algorithm.jl`) wire together
@@ -16,4 +16,4 @@ Convergence assumptions (e.g., monotonicity of ``\\psi``, closed convex
 does not enforce them at runtime — algorithms iterate regardless and
 either converge or terminate via a stopping criterion.
 """
-abstract type AbstractDFProjectionAlgorithm <: SciMLBase.AbstractNonlinearAlgorithm end
+abstract type AbstractDFProjection <: SciMLBase.AbstractNonlinearAlgorithm end

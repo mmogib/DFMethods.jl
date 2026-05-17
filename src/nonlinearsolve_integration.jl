@@ -8,7 +8,7 @@
 # So `solve(prob, alg; kw...)` calls `init(prob, alg; kw...)` (which must
 # return a cache) and then `solve!(cache)` (which must return the solution).
 #
-# Convention: `AbstractDFProjectionAlgorithm` already subtypes
+# Convention: `AbstractDFProjection` already subtypes
 # `SciMLBase.AbstractNonlinearAlgorithm` (declared in types.jl), so the
 # only hooks we add here are the two CommonSolve methods plus a thin
 # `DFSciMLCache` wrapper that carries the problem (needed for

@@ -12,7 +12,7 @@ CurrentModule = DFMethods
 ## Algorithm types
 
 ```@docs
-AbstractDFProjectionAlgorithm
+AbstractDFProjection
 DFProjection
 DFProjectionCache
 ```
