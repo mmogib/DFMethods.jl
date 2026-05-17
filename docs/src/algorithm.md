@@ -18,7 +18,7 @@ This holds whenever $\psi$ is monotone or pseudo-monotone — the framework's co
 
 ## One outer iteration
 
-Each call to `step!` (or one pass of `solve_df!`) performs:
+Each call to `step!` (one outer iteration of the driver inside `solve(prob, alg)`) performs:
 
 1. **Inertial extrapolation.**
    ```math

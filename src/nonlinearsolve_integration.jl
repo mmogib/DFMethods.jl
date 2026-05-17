@@ -25,9 +25,9 @@ using CommonSolve
 # Captures `prob.p` and (in the in-place case) a reusable internal buffer.
 #
 # The in-place form returns a *copy* of the internal buffer each call so
-# downstream Phase 2 callers can hold the result across non-consecutive
-# ψ-calls. Phase 3 polish can thread an in-place `F!(out, x)` all the way
-# through `solve_df` to eliminate the copy.
+# downstream callers can hold the result across non-consecutive ψ-calls.
+# A polish item is threading an in-place `F!(out, x)` all the way through
+# the inner cache to eliminate the copy.
 function _wrap_problem_F(prob::SciMLBase.NonlinearProblem)
     f = prob.f
     p = prob.p
@@ -136,12 +136,26 @@ Drive the inner cache to termination, then build and return a
 `SciMLBase.NonlinearSolution`.
 """
 function CommonSolve.solve!(cache::DFSciMLCache)
-    solve_df!(cache.inner)
-    resid_vec = cache.inner.F(cache.inner.x)
-    stats = SciMLBase.NLStats(cache.inner.n_evals + 1, 0, 0, 0, cache.inner.k)
+    inner = cache.inner
+    while !inner.done
+        step!(inner)
+    end
+    # Finalize residual if the loop hit max-iters or line-search failure
+    # without setting it via an early-return branch.
+    if isnan(inner.resid)
+        Fx_final = inner.F(inner.x)
+        s = 0.0
+        @inbounds for i in eachindex(Fx_final)
+            s += Fx_final[i] * Fx_final[i]
+        end
+        inner.resid    = sqrt(s)
+        inner.n_evals += 1
+    end
+    resid_vec = inner.F(inner.x)
+    stats = SciMLBase.NLStats(inner.n_evals + 1, 0, 0, 0, inner.k)
     return SciMLBase.build_solution(cache.prob, cache.alg,
-                                    cache.inner.x, resid_vec;
-                                    retcode = _to_sciml_retcode(cache.inner.retcode),
+                                    inner.x, resid_vec;
+                                    retcode = _to_sciml_retcode(inner.retcode),
                                     stats   = stats)
 end
 

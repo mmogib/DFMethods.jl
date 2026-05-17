@@ -11,7 +11,7 @@ include("search_directions.jl")           # AbstractSearchDirection + SpectralTh
 include("line_searches.jl")               # AbstractDFLineSearch + LSI..LSVII
 include("projection.jl")                  # Approximate projection onto X ∩ H_k
 include("stopping_criteria.jl")           # AbstractStoppingCriterion + variants
-include("algorithm.jl")                   # DFProjection + cache + step! + solve_df
+include("algorithm.jl")                   # DFProjection + cache + step!
 include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
 
 # ── Exports ──────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ export
     should_stop_at_w, should_stop_at_z, should_stop_at_end,
 
     # algorithm.jl
-    DFProjection, DFProjectionCache, DFSolution,
-    init_cache, solve_df, solve_df!
+    DFProjection, DFProjectionCache,
+    init_cache
 
 end # module DFMethods

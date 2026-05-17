@@ -1,4 +1,4 @@
-# algorithm.jl — DFProjection algorithm, cache, step!, and solve_df driver.
+# algorithm.jl — DFProjection algorithm, cache, and step!.
 #
 # Implements Algorithm 1 (UIDFPAF) of Ibrahim, Alshahrani, Al-Homidan (JOTA 2026).
 # One outer iteration:
@@ -100,7 +100,7 @@ State fields:
 - `k::Int` — iteration counter (0-based).
 - `n_evals::Int` — total ψ evaluations.
 - `converged::Bool` — true on successful early-stop.
-- `done::Bool` — true once `solve_df!` should exit the loop.
+- `done::Bool` — true once the driver should exit the loop.
 - `retcode::Symbol` — `:Default`, `:Success`, `:MaxIters`, `:LineSearchFailed`,
   `:DegenerateResidual`.
 - `resid::Float64` — final ‖ψ‖ at the returned iterate (`NaN` until set).
@@ -150,26 +150,6 @@ mutable struct DFProjectionCache{Alg<:DFProjection, F}
     # search. Used by directions whose update rule depends on the previous
     # step displacement s_{k-1} = α_{k-1} · d_{k-1} (e.g. GMOPCGM).
     α_prev::Float64
-end
-
-# ============================================================================
-# DFSolution: returned from solve_df
-# ============================================================================
-
-"""
-    DFSolution
-
-Immutable result returned from `solve_df`. Phase 3 will replace this
-with a `SciMLBase.NonlinearSolution` once `NonlinearSolveBase` is wired
-in; the field set will be preserved.
-"""
-struct DFSolution
-    x::Vector{Float64}
-    resid::Float64
-    converged::Bool
-    iterations::Int
-    n_evals::Int
-    retcode::Symbol
 end
 
 # ============================================================================
@@ -391,67 +371,14 @@ function step!(cache::DFProjectionCache)
         cache.converged = (code === :Success)
         cache.retcode   = code
         cache.done      = true
-        # resid is left as NaN for end-of-iter stops; `solve_df!`
+        # resid is left as NaN for end-of-iter stops; the driver
         # finalizes it with a single ψ(x_final) call after the loop.
     end
 
     return cache
 end
 
-# ============================================================================
-# Driver: solve_df / solve_df!
-# ============================================================================
-
-"""
-    solve_df!(cache) -> cache
-
-Drive the algorithm to termination given an initialized `cache`.
-"""
-function solve_df!(cache::DFProjectionCache)
-    while !cache.done
-        step!(cache)
-    end
-    # Finalize residual if the loop hit max-iters or line-search failure
-    # without setting it via an early-return branch.
-    if isnan(cache.resid)
-        ψx_final = cache.F(cache.x)
-        s = 0.0
-        @inbounds for i in eachindex(ψx_final)
-            s += ψx_final[i] * ψx_final[i]
-        end
-        cache.resid    = sqrt(s)
-        cache.n_evals += 1
-    end
-    return cache
-end
-
-"""
-    solve_df(F, x0, alg) -> DFSolution
-
-Top-level entry point. Builds a cache, runs the loop, returns a
-`DFSolution`. `F` is an out-of-place mapping `F(x) -> Vector`. Phase 3
-will replace this with `SciMLBase.solve(prob::NonlinearProblem, alg)`.
-
-# Example
-```julia
-F = x -> x .- [0.3, -0.2]   # solution at [0.3, -0.2]
-alg = DFProjection(; set = BoxSet([-1.0, -1.0], [1.0, 1.0]),
-                    abstol = 1e-8)
-sol = solve_df(F, [1.0, -1.0], alg)
-sol.x         # ≈ [0.3, -0.2]
-sol.converged # true
-sol.retcode   # :Success
-```
-"""
-function solve_df(F, x0::AbstractVector, alg::DFProjection)
-    cache = init_cache(F, x0, alg)
-    solve_df!(cache)
-    return DFSolution(
-        copy(cache.x),
-        cache.resid,
-        cache.converged,
-        cache.k,
-        cache.n_evals,
-        cache.retcode,
-    )
-end
+# Note: the inner-cache run-loop has moved into
+# `CommonSolve.solve!(::DFSciMLCache)` in `nonlinearsolve_integration.jl`.
+# `DFProjectionCache` is driven externally via repeated `step!` calls;
+# there is no longer a standalone `solve_df` / `solve_df!` entry point.

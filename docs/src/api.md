@@ -15,14 +15,11 @@ CurrentModule = DFMethods
 AbstractDFProjectionAlgorithm
 DFProjection
 DFProjectionCache
-DFSolution
 ```
 
 ## Solving
 
 ```@docs
-solve_df
-solve_df!
 init_cache
 step!
 ```

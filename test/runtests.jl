@@ -236,13 +236,13 @@ end
     end
 
     # ========================================================================
-    # Algorithm: solve_df
+    # Algorithm: DFProjection via the SciML solve interface
     # ========================================================================
 
-    @testset "DFProjection + solve_df" begin
+    @testset "DFProjection via solve" begin
         @testset "Unconstrained linear F: ψ(x) = x → x* = 0" begin
-            F = x -> copy(x)
-            x0 = [1.0, 1.0]
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
                 linesearch = LSI(),
@@ -251,18 +251,17 @@ end
                 abstol     = 1e-6,
                 maxiters   = 500,
             )
-            sol = solve_df(F, x0, alg)
-            @test sol.converged
-            @test sol.retcode == :Success
-            @test norm(sol.x) <= 1e-5
-            @test sol.iterations < 500
-            @test sol.n_evals > 0
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-5
+            @test sol.stats.nsteps < 500
+            @test sol.stats.nf > 0
         end
 
         @testset "Affine F with box: ψ(x) = x - target, target inside box" begin
             target = [0.3, -0.2]
-            F = x -> x .- target
-            x0 = [1.0, -1.0]
+            f(u, p) = u .- target
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0])
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
                 linesearch = LSII(),
@@ -271,10 +270,9 @@ end
                 abstol     = 1e-6,
                 maxiters   = 1000,
             )
-            sol = solve_df(F, x0, alg)
-            @test sol.converged
-            @test sol.retcode == :Success
-            @test sol.x ≈ target atol=1e-4
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test sol.u ≈ target atol=1e-4
         end
 
         @testset "Infeasible x0 gets projected" begin
@@ -323,15 +321,16 @@ end
             @test 0 < _RECORDED_ALPHA_PREV[] <= 1.0
         end
 
-        @testset "DFSolution fields" begin
-            F = x -> copy(x)
-            sol = solve_df(F, [0.5, 0.5], DFProjection(; maxiters=100))
-            @test sol isa DFSolution
-            @test sol.x isa Vector{Float64}
-            @test isfinite(sol.resid)
-            @test sol.iterations >= 0
-            @test sol.n_evals    >= 1
-            @test sol.retcode    isa Symbol
+        @testset "NonlinearSolution fields from solve" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [0.5, 0.5])
+            sol = solve(prob, DFProjection(; maxiters=100))
+            @test sol isa SciMLBase.AbstractNonlinearSolution
+            @test sol.u isa Vector{Float64}
+            @test sol.resid isa Vector{Float64}
+            @test sol.stats.nsteps >= 0
+            @test sol.stats.nf    >= 1
+            @test sol.retcode    isa SciMLBase.ReturnCode.T
         end
     end
 
