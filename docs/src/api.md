@@ -9,6 +9,18 @@ CurrentModule = DFMethods
 ```@index
 ```
 
+## Problem types
+
+```@docs
+ConstrainedNonlinearProblem
+```
+
+A standard `SciMLBase.NonlinearProblem` covers unconstrained problems and
+box-constrained problems (via `prob.lb` / `prob.ub`).
+[`ConstrainedNonlinearProblem`](@ref) wraps a `NonlinearProblem` together
+with an [`AbstractConstraintSet`](@ref) for arbitrary closed convex feasible
+sets.
+
 ## Algorithm types
 
 ```@docs
@@ -21,8 +33,12 @@ DFProjectionCache
 
 ```@docs
 init_cache
-step!
 ```
+
+The internal `DFMethods.step!(::DFProjectionCache)` advances one outer
+iteration on the inner cache and is used by `CommonSolve.step!` below.
+User-level driving goes through `solve(prob, alg)` or the `init` / `step!`
+/ `solve!` triplet documented under [SciML integration](#SciML-integration).
 
 ## SciML integration
 
@@ -51,7 +67,19 @@ AdaptiveClampedBacktrack
 
 Each is a subtype of `LineSearch.AbstractLineSearchAlgorithm` (from
 [`LineSearch.jl`](https://github.com/SciML/LineSearch.jl)) and implements
-the standard `CommonSolve.init` / `CommonSolve.solve!` contract.
+the standard `CommonSolve.init` / `CommonSolve.solve!` contract. User-defined
+line searches obey the same contract.
+
+## Iterate-update strategies
+
+```@docs
+AbstractIterateUpdate
+SolodovSvaiterProjection
+DirectUpdate
+HalpernUpdate
+update_iterate!
+DFMethods.init_state
+```
 
 ## Inertial rules
 
