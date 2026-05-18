@@ -11,8 +11,8 @@ Subtypes `SciMLBase.AbstractNonlinearAlgorithm`, so every concrete
 algorithm participates in `solve(prob::NonlinearProblem, alg; kwargs...)`
 out of the box.
 
-Convergence assumptions (e.g., monotonicity of ``\\psi``, closed convex
-``X``) are documented in [`docs/src/algorithm.md`](@ref). The library
+Convergence assumptions (e.g., monotonicity of ``F``, closed convex
+``X``) are documented on the *Algorithm* page of the manual. The library
 does not enforce them at runtime — algorithms iterate regardless and
 either converge or terminate via a stopping criterion.
 """

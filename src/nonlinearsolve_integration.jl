@@ -208,6 +208,19 @@ function CommonSolve.solve!(cache::DFSciMLCache)
 end
 
 # ============================================================================
+# SciMLBase.__solve dispatch — ensures DFProjection wins over NonlinearSolveBase's
+# generic __solve(::NonlinearProblem, ::AbstractNonlinearAlgorithm) when
+# `using NonlinearSolve` is loaded alongside DFMethods. Without this method,
+# NonlinearSolveBase routes the call through its polyalgorithm dispatcher,
+# which is unaware of DFProjection and breaks on box-constrained problems.
+# ============================================================================
+
+SciMLBase.__solve(prob::Union{SciMLBase.NonlinearProblem,
+                              ConstrainedNonlinearProblem},
+                  alg::DFProjection; kwargs...) =
+    CommonSolve.solve!(CommonSolve.init(prob, alg; kwargs...))
+
+# ============================================================================
 # CommonSolve.step! dispatch — manual single-iteration advance
 # ============================================================================
 

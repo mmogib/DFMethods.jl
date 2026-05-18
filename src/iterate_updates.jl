@@ -125,11 +125,20 @@ end
 """
     HalpernUpdate(β)
 
-Halpern-style averaging: `x_{k+1} = β·x_0 + (1 − β)·z`. The parameter `β`
-is either a scalar (constant across iterations) or a callable
-`β(k) -> Float64` (per-iteration schedule, e.g. `k -> 1 / (k + 2)` for
-the classical schedule with strong convergence to the nearest fixed
-point).
+Halpern-style averaging with feasibility maintenance:
+
+```
+x_{k+1} = P_X(β · x_0 + (1 − β) · z_k)
+```
+
+where `P_X` is projection onto the problem's feasibility set `X`. The
+trial point `z_k = w_k + α_k d_k` is generally infeasible, so the final
+projection is required to maintain the framework invariant `x_k ∈ X`.
+
+The parameter `β` is either a scalar (constant across iterations) or a
+callable `β(k) -> Float64` (per-iteration schedule, e.g.
+`k -> 1 / (k + 2)` for the classical schedule with strong convergence
+to the nearest fixed point).
 """
 struct HalpernUpdate{B} <: AbstractIterateUpdate
     β::B
@@ -139,25 +148,30 @@ end
     HalpernState
 
 Per-solve state for `HalpernUpdate`: holds a copy of the initial
-feasible iterate `x_0`.
+feasible iterate `x_0` and a scratch buffer for the pre-projection
+combination `β·x_0 + (1-β)·z_k`.
 """
 struct HalpernState
     x0::Vector{Float64}
+    combination_buf::Vector{Float64}
 end
 
 function init_state(rule::HalpernUpdate, prob, x0, alg)
-    # x0 is already projected onto alg.set by init_cache; copy here.
-    return HalpernState(copy(collect(Float64, x0)))
+    # x0 is already projected onto the resolved set by init_cache; copy here.
+    x0_copy = copy(collect(Float64, x0))
+    return HalpernState(x0_copy, Vector{Float64}(undef, length(x0_copy)))
 end
 
 @inline _halpern_β(β::Number, k) = Float64(β)
 @inline _halpern_β(β,        k) = Float64(β(k))
 
 function update_iterate!(x_new::AbstractVector, rule::HalpernUpdate, ctx)
-    β = _halpern_β(rule.β, ctx.k)
+    β     = _halpern_β(rule.β, ctx.k)
     state = ctx.state
-    @inbounds @simd for i in eachindex(x_new)
-        x_new[i] = β * state.x0[i] + (1.0 - β) * ctx.z[i]
+    buf   = state.combination_buf
+    @inbounds @simd for i in eachindex(buf)
+        buf[i] = β * state.x0[i] + (1.0 - β) * ctx.z[i]
     end
+    project!(x_new, buf, ctx.set)
     return x_new
 end

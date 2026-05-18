@@ -293,13 +293,6 @@ end
 # step!: one outer iteration of Algorithm 1
 # ============================================================================
 
-"""
-    step!(cache) -> cache
-
-Perform one outer iteration of UIDFPAF. Updates `cache.x`, `cache.k`,
-function-value buffers, and sets `cache.done = true` on termination.
-Returns the cache (mutated).
-"""
 # Fire `event` to all observers and the stopping criterion. Sets cache.done
 # if any stopping criterion fires.
 function _fire!(cache::DFProjectionCache, alg::DFProjection, event::Symbol)
@@ -315,6 +308,13 @@ function _fire!(cache::DFProjectionCache, alg::DFProjection, event::Symbol)
     return nothing
 end
 
+"""
+    step!(cache::DFProjectionCache) -> cache
+
+Perform one outer iteration of UIDFPAF. Updates `cache.x`, `cache.k`,
+function-value buffers, and sets `cache.done = true` on termination.
+Returns the cache (mutated).
+"""
 function step!(cache::DFProjectionCache)
     cache.done && return cache
 

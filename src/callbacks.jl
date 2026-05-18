@@ -30,6 +30,11 @@ column set for [`LoggingCallback`](@ref).
 | `:n_evals` | Cumulative F evaluations                         |
 | `:resid`   | `cache.resid` (`NaN` until set at termination)   |
 | `:elapsed` | Wall-clock seconds since solve start             |
+
+```jldoctest
+julia> HISTORY_FIELDS
+(:k, :F_norm, :d_norm, :α, :n_evals, :resid, :elapsed)
+```
 """
 const HISTORY_FIELDS = (:k, :F_norm, :d_norm, :α, :n_evals, :resid, :elapsed)
 

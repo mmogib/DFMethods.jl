@@ -335,6 +335,26 @@ end
             @test DFMethods.init_state(DirectUpdate(),             prob, x0, alg) === nothing
             @test DFMethods.init_state(HalpernUpdate(0.5),         prob, x0, alg) isa DFMethods.HalpernState
         end
+
+        @testset "HalpernUpdate maintains feasibility on box-constrained problem" begin
+            # Solution of F(u) = u is u* = 0, which is inside [-0.5, 0.5]^2.
+            # The line-search trial points z_k can land outside the box; without
+            # the final P_X step in HalpernUpdate, sol.u would generally violate
+            # the bounds. With the projection in place, every iterate (including
+            # the final one) must lie in the box.
+            f(u, p) = copy(u)
+            x0     = [0.4, 0.4]
+            lb, ub = fill(-0.5, 2), fill(0.5, 2)
+            prob   = SciMLBase.NonlinearProblem(f, x0; lb = lb, ub = ub)
+            alg    = DFProjection(;
+                iterate_update = HalpernUpdate(0.3),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 200,
+            )
+            sol = solve(prob, alg)
+            @test all(lb .- 1e-12 .≤ sol.u .≤ ub .+ 1e-12)
+        end
     end
 
     # ========================================================================

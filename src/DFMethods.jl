@@ -32,6 +32,7 @@ export
     # inertial.jl
     AbstractInertialRule,
     NoInertial, Inertial,
+    inertial_coef, apply_inertial!,
 
     # search_directions.jl
     AbstractSearchDirection,

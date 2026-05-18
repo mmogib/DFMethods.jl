@@ -36,6 +36,14 @@ function project! end
 The whole of ``\\mathbb{R}^n`` — projection is the identity. Use to
 disable constraints (e.g., for unconstrained benchmarking against
 NonlinearSolve.jl's `SimpleDFSane`).
+
+```jldoctest
+julia> project([1.0, -2.0, 3.0], RealSpace())
+3-element Vector{Float64}:
+  1.0
+ -2.0
+  3.0
+```
 """
 struct RealSpace <: AbstractConstraintSet end
 
@@ -51,6 +59,14 @@ project!(y::AbstractVector, x::AbstractVector, ::RealSpace) = (y .= x; return y)
 Box constraint ``\\{x : \\text{lower}_i \\le x_i \\le \\text{upper}_i\\}``.
 `lower` and `upper` are vectors of equal length with `lower[i] ≤ upper[i]`
 element-wise. Use `BoxSet(fill(a, n), fill(b, n))` for uniform scalar bounds.
+
+```jldoctest
+julia> project([2.0, -3.0, 0.5], BoxSet([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]))
+3-element Vector{Float64}:
+  1.0
+ -1.0
+  0.5
+```
 """
 struct BoxSet{T<:AbstractFloat} <: AbstractConstraintSet
     lower::Vector{T}

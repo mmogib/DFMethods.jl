@@ -32,6 +32,11 @@ function inertial_coef end
 
 Disables inertia: ``w_k = x_k``. Useful for ablation comparisons against
 the paper's accelerated variant.
+
+```jldoctest
+julia> inertial_coef(NoInertial(), 5, [1.0, 2.0], [0.0, 1.0])
+0.0
+```
 """
 struct NoInertial <: AbstractInertialRule end
 
@@ -60,6 +65,17 @@ the heavy-ball / inertial idea for monotone operators; Maingé 2008
 gave the modern form; Abubakar et al. 2021 (ref [1] in Ibrahim 2026)
 introduced this specific `1/k²` cap for DF projection methods;
 Ibrahim 2026 carries it into eq. (2) of the unified framework.
+
+```jldoctest
+julia> Inertial().θ
+0.25
+
+julia> Inertial(0.4).θ
+0.4
+
+julia> inertial_coef(Inertial(0.25), 0, [1.0], [0.0])    # k=0: no inertia
+0.0
+```
 """
 struct Inertial <: AbstractInertialRule
     θ::Float64
