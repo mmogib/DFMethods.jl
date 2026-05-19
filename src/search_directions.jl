@@ -20,8 +20,8 @@ NamedTuple carrying the per-iteration cache state. The fields are:
 
 | Field | Type | Description |
 |---|---|---|
-| `ctx.Fw` | `Vector{Float64}` | ``\\psi`` at the inertial point ``w_k`` |
-| `ctx.Fw_prev` | `Vector{Float64}` | ``\\psi`` at the previous inertial point ``w_{k-1}`` |
+| `ctx.Fw` | `Vector{Float64}` | ``F`` at the inertial point ``w_k`` |
+| `ctx.Fw_prev` | `Vector{Float64}` | ``F`` at the previous inertial point ``w_{k-1}`` |
 | `ctx.w` | `Vector{Float64}` | inertial point ``w_k`` |
 | `ctx.w_prev` | `Vector{Float64}` | previous inertial point ``w_{k-1}`` |
 | `ctx.d_prev` | `Vector{Float64}` | previous direction ``d_{k-1}`` |
@@ -35,9 +35,10 @@ direction methods — they will just be unused by older code.
 For `ctx.k == 0`, only `ctx.Fw` is meaningful; the other fields may be
 uninitialized. Rules typically set `d = -Fw` at `k = 0`.
 
-The convergence theory in Ibrahim 2026 (Thm 3.1) requires sufficient
+The convergence theory for this class of algorithms requires sufficient
 descent (`-Fw' d ≥ c‖Fw‖²`) and boundedness (`‖d‖ ≤ c̄‖Fw‖`). It is
-the rule author's responsibility to ensure these hold.
+the rule author's responsibility to ensure these hold; see the
+References page for theoretical sources.
 """
 abstract type AbstractSearchDirection end
 
@@ -46,7 +47,8 @@ init_state(::AbstractSearchDirection, prob, x0, alg) = nothing
 
 # ============================================================================
 # SpectralThreeTerm: Spectral Three-Term Derivative-Free Projection Method
-# (Ibrahim 2026 eq. on p. 4 / based on ref [12])
+# (Ibrahim, Alshahrani, Al-Homidan 2023, Numerical Algorithms — see the
+#  References page of the docs.)
 # ============================================================================
 
 """
@@ -70,13 +72,13 @@ v_k     = max(alpha_bar · ‖d_{k-1}‖ · ‖y_{k-1}‖, ‖F(w_{k-1})‖²)
 ϑ_k^II  = (F(w_k)' d_{k-1}) / v_k
 ```
 
-Satisfies the sufficient-descent (eq. 3) and boundedness (eq. 4)
-properties used in the convergence proofs.
+Satisfies the sufficient-descent and boundedness properties used in
+the convergence proofs for this class of algorithms.
 
 # Parameters
-- `r`: spectral parameter in the definition of `s_{k-1}` (paper uses 0.1).
+- `r`: spectral parameter in the definition of `s_{k-1}` (default 0.1).
 - `alpha_bar`: the parameter ``\\bar{α}_1`` in the definition of `v_k`
-  (paper uses 1.0).
+  (default 1.0).
 """
 Base.@kwdef struct SpectralThreeTerm <: AbstractSearchDirection
     r::Float64         = 0.1

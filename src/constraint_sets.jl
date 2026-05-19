@@ -142,8 +142,8 @@ end
 
 Intersection of two closed convex sets. Projection uses Dykstra's
 algorithm (alternating projection with two correction sequences). For
-``\\text{Box} \\cap \\text{HalfSpace}`` (the paper's polyhedral
-``\\Omega``), Dykstra converges geometrically.
+``\\text{Box} \\cap \\text{HalfSpace}`` (the polyhedral set
+``\\Omega`` realized by [`CappedBox`](@ref)), Dykstra converges geometrically.
 
 For workloads that need general polyhedral projection, a direct QP
 solver (JuMP + HiGHS) will be added in Phase 2 as an alternative backend.
@@ -190,16 +190,17 @@ function project!(y::AbstractVector, x::AbstractVector, set::Intersection)
 end
 
 # ============================================================================
-# CappedBox: Ω(a, b, c) = [a, b]^n ∩ {x : Σ x_i ≤ c}  (Ibrahim 2026 eq. 33)
+# CappedBox: Ω(a, b, c) = [a, b]^n ∩ {x : Σ x_i ≤ c}
 # ============================================================================
 
 """
     CappedBox(a, b, c)
 
 The polyhedral set ``\\Omega(a, b, c) = \\{x \\in \\mathbb{R}^n : a \\le x_i \\le b,\\ \\sum_i x_i \\le c\\}``
-used in Ibrahim 2026 for the numerical experiments (eq. 33). `a, b, c`
-are scalars; the dimension `n` is inferred from the input vector at
-projection time.
+— a uniform-bound box intersected with a single budget-style halfspace.
+`a, b, c` are scalars; the dimension `n` is inferred from the input
+vector at projection time. This set is a common experimental domain in
+the convex-constrained nonlinear-equations literature.
 
 # Projection
 Closed-form via bisection on a 1D Lagrange multiplier:

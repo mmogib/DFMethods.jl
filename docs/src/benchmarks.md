@@ -22,8 +22,8 @@ Experimental design — the `s30_benchmark.jl --all` configuration:
 | Dimension                | 1 000, 10 000, 15 000 (3)                                                     |
 | **Total runs**           | **3 000**                                                                     |
 
-Constraint set throughout: $\Omega(a, b, c) = [a,b]^n \cap \{x : \sum_i x_i
-\leq c\}$ (Ibrahim 2026 polyhedral domain), implemented as
+Constraint set throughout: the polyhedral domain $\Omega(a, b, c) =
+[a,b]^n \cap \{x : \sum_i x_i \leq c\}$, implemented as
 [`CappedBox`](@ref). Tolerance $\varepsilon = 10^{-6}$; iteration budget
 $5\,000$.
 
@@ -112,15 +112,15 @@ DFProjection(;
     direction      = SpectralThreeTerm(),       # 20–26 vs 700+ avg iters
     linesearch     = ResidualNormBacktrack(),   # 77 vs 2761 avg F-evals
     inertial       = Inertial(0.25),            # 3–4× speedup on MPRPL-class
-    iterate_update = SolodovSvaiterProjection(),# reproduces Ibrahim 2026
+    iterate_update = SolodovSvaiterProjection(),# Solodov–Svaiter hyperplane projection
     abstol         = 1e-6,
     maxiters       = 2000,
 )
 ```
 
-These are the empirical settings; the convergence theorem of Ibrahim 2026
-holds for any direction × line search × iterate update obeying the
-contracts of [Extending](@ref).
+These are the empirical settings; a representative convergence theorem
+for this framework (see [References](@ref)) holds for any direction ×
+line search × iterate update obeying the contracts of [Extending](@ref).
 
 ## Reproducing
 

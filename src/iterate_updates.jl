@@ -10,28 +10,26 @@
 # `x_{k+1}` from the post-line-search state `(w, d, α, z, Fw, Fz)`.
 #
 # Three concrete strategies ship:
-#   SolodovSvaiterProjection  — default; hyperplane projection (Ibrahim 2026)
+#   SolodovSvaiterProjection  — default; hyperplane projection (Solodov & Svaiter 1999)
 #   DirectUpdate              — x_{k+1} = project(z, set); simplest baseline
-#   HalpernUpdate(β)          — x_{k+1} = β·x_0 + (1-β)·z; averaging variant
+#   HalpernUpdate(β)          — x_{k+1} = β·x_0 + (1-β)·z; averaging variant (Halpern 1967)
 
 # Default: strategies are stateless (see init_state contract in types.jl).
 init_state(::AbstractIterateUpdate, prob, x0, alg) = nothing
 
 # ============================================================================
-# SolodovSvaiterProjection (default — reproduces Ibrahim 2026 steps 6–7)
+# SolodovSvaiterProjection — hyperplane projection (Solodov & Svaiter 1999)
 # ============================================================================
 
 """
     SolodovSvaiterProjection()
 
-Default iterate-update strategy. Implements the Solodov–Svaiter
-hyperplane projection: given the trial point `z` with residual `F(z)`,
-construct the separating hyperplane `H_k = {x : F(z)' (x − z) ≤ 0}` and
-project the target `w − λ_k F(z)` onto `X ∩ H_k` to tolerance
+Default iterate-update strategy. Implements the hyperplane projection
+scheme of Solodov & Svaiter (1999): given the trial point `z` with
+residual `F(z)`, construct the separating hyperplane
+`H_k = {x : F(z)' (x − z) ≤ 0}` and project the target
+`w − λ_k F(z)` onto `X ∩ H_k` to tolerance
 `ε_k = (ζ²/2) ‖λ_k F(z)‖²`.
-
-This reproduces v0.1 behavior bit-for-bit when used as the iterate
-update.
 """
 struct SolodovSvaiterProjection <: AbstractIterateUpdate end
 

@@ -1,41 +1,43 @@
 # algorithm.jl — DFProjection algorithm, cache, and step!.
 #
-# Implements Algorithm 1 (UIDFPAF) of Ibrahim, Alshahrani, Al-Homidan (JOTA 2026).
+# Generic derivative-free projection algorithm with pluggable components.
 # One outer iteration:
 #   1. Inertial:        w_k = x_k + θ_k (x_k - x_{k-1})
 #   2. Eval:            F_w = F(w_k); early-stop if ‖F_w‖ ≤ ε
 #   3. Direction:       d_k = direction!(...)
-#   4. Backtracking LS: α_k via the seven LS variants
+#   4. Backtracking LS: α_k via the supplied line-search rule
 #   5. Trial:           z_k = w_k + α_k d_k;  F_z = F(z_k)
 #                       early-stop if ‖F_z‖ ≤ ε AND z_k ∈ X
-#   6. Hyperplane:      H_k = {x : F_z' (x - z_k) ≤ 0}
-#                       λ_k = F_z' (w_k - z_k) / ‖F_z‖²
-#                       ε_k = (ζ²/2) ‖λ_k F_z‖²
-#   7. Projection:      x_{k+1} = approx_project(X ∩ H_k, w_k - λ_k F_z, ε_k)
+#   6. Iterate update:  x_{k+1} via the supplied AbstractIterateUpdate
+#                       (default SolodovSvaiterProjection — hyperplane projection;
+#                        alternatives: DirectUpdate, HalpernUpdate).
 
 # ============================================================================
 # DFProjection: concrete algorithm
 # ============================================================================
 
 """
-    DFProjection(; direction, linesearch, inertial, set,
-                   abstol, maxiters, stopping, ζ, inner_maxiter, maxbt)
+    DFProjection(; direction, linesearch, inertial, iterate_update,
+                   abstol, maxiters, stopping, ζ, inner_maxiter, maxbt,
+                   callbacks)
 
-Concrete derivative-free projection algorithm. Each component is
-swappable; defaults reproduce the Ibrahim 2026 paper setup (SpectralThreeTerm
-direction, LSII line search, `Inertial(0.25)`, paper `ζ = 0.5`).
+Concrete derivative-free projection algorithm with pluggable components.
+The constraint set lives on the **problem**, not on the algorithm — see
+[`ConstrainedNonlinearProblem`](@ref) and the `lb`/`ub` keywords of
+`NonlinearProblem`.
 
 # Fields
 - `direction::AbstractSearchDirection` — search-direction rule. Default: `SpectralThreeTerm()`.
-- `linesearch::AbstractDFLineSearch`   — line search. Default: `LSII()`.
+- `linesearch::LineSearch.AbstractLineSearchAlgorithm` — line search. Default: `ResidualNormBacktrack()`.
 - `inertial::AbstractInertialRule`     — inertial rule. Default: `Inertial(0.25)`.
-- `set::AbstractConstraintSet`         — feasible set ``X``. Default: `RealSpace()`.
+- `iterate_update::AbstractIterateUpdate` — post-line-search iterate update strategy. Default: `SolodovSvaiterProjection()`. Alternatives: `DirectUpdate()`, `HalpernUpdate(β)`.
 - `abstol::Float64`                    — residual tolerance used to build the default stopping. Default: `1e-6`.
 - `maxiters::Int`                      — outer-iteration cap used to build the default stopping. Default: `2000`.
 - `stopping::AbstractStoppingCriterion` — full stopping rule. If not supplied, built as `AnyOf(AbsResidualTol(abstol), MaxIters(maxiters))`.
-- `ζ::Float64`                         — approximate-projection tolerance factor (paper ζ_k ≡ ζ). Default: `0.5`.
-- `inner_maxiter::Int`                 — max Dykstra iterations inside `approx_project_X_halfspace!`. Default: `500`.
+- `ζ::Float64`                         — approximate-projection tolerance factor used by `SolodovSvaiterProjection`. Default: `0.5`.
+- `inner_maxiter::Int`                 — max inner-projection iterations (Dykstra). Default: `500`.
 - `maxbt::Int`                         — max line-search backtracks per iteration. Default: `50`.
+- `callbacks::Vector{<:AbstractCallback}` — observer callbacks fired during the solve. Default: empty.
 
 # Stopping criteria
 `abstol` and `maxiters` are convenience knobs that build the default
@@ -170,7 +172,7 @@ end
     init_cache(F, x0, alg) -> DFProjectionCache
 
 Allocate per-solve buffers and prepare the initial state. Projects
-`x0` onto `set` to ensure feasibility (paper assumes `x_0 ∈ X`).
+`x0` onto `set` to ensure the feasibility invariant `x_0 ∈ X`.
 Evaluates `F` once at the projected `x_0` to populate `F0_norm`
 (used by `RelResidualTol`) and starts the wall-clock for `MaxTime`.
 """
@@ -290,7 +292,7 @@ function _is_feasible(x::AbstractVector, set::AbstractConstraintSet,
 end
 
 # ============================================================================
-# step!: one outer iteration of Algorithm 1
+# step!: one outer iteration
 # ============================================================================
 
 # Fire `event` to all observers and the stopping criterion. Sets cache.done
@@ -311,9 +313,9 @@ end
 """
     step!(cache::DFProjectionCache) -> cache
 
-Perform one outer iteration of UIDFPAF. Updates `cache.x`, `cache.k`,
-function-value buffers, and sets `cache.done = true` on termination.
-Returns the cache (mutated).
+Perform one outer iteration of the derivative-free projection algorithm.
+Updates `cache.x`, `cache.k`, function-value buffers, and sets
+`cache.done = true` on termination. Returns the cache (mutated).
 """
 function step!(cache::DFProjectionCache)
     cache.done && return cache

@@ -8,10 +8,8 @@ coefficient ``θ_k`` from the iteration index, current iterate, and
 previous iterate. The inertial point is then
 
 ```
-w_k = x_k + θ_k (x_k - x_{k-1})
+w_k = x_k + θ_k (x_k - x_{k-1}).
 ```
-
-(Ibrahim 2026 eq. (2)).
 """
 abstract type AbstractInertialRule end
 
@@ -31,7 +29,7 @@ function inertial_coef end
     NoInertial()
 
 Disables inertia: ``w_k = x_k``. Useful for ablation comparisons against
-the paper's accelerated variant.
+the inertial variant.
 
 ```jldoctest
 julia> inertial_coef(NoInertial(), 5, [1.0, 2.0], [0.0, 1.0])
@@ -43,7 +41,7 @@ struct NoInertial <: AbstractInertialRule end
 inertial_coef(::NoInertial, k, xk, xkm1) = 0.0
 
 # ============================================================================
-# Inertial: Ibrahim 2026 eq. (2)
+# Inertial: summable-step extrapolation rule
 # ============================================================================
 
 """
@@ -56,15 +54,15 @@ Standard summable-step inertial-extrapolation rule:
       θ                                       otherwise
 ```
 
-`θ ∈ (0, 1)`. Ibrahim 2026 uses `θ = 0.25` in its experiments.
+`θ ∈ (0, 1)`; `0.25` is a common default value in the literature.
 
 The `1/k²` cap ensures ``\\sum_k θ_k \\|x_k - x_{k-1}\\| \\le \\sum_k 1/k^2 < ∞``,
 which is the summability condition that drives the convergence proof
-(Ibrahim 2026 Remark 2.2). Lineage: Alvarez–Attouch 2001 introduced
-the heavy-ball / inertial idea for monotone operators; Maingé 2008
-gave the modern form; Abubakar et al. 2021 (ref [1] in Ibrahim 2026)
-introduced this specific `1/k²` cap for DF projection methods;
-Ibrahim 2026 carries it into eq. (2) of the unified framework.
+for inertial schemes of this class. Lineage: Alvarez & Attouch (2001)
+introduced the heavy-ball / inertial idea for monotone operators;
+Maingé (2008) gave the modern form for inertial KM-type algorithms;
+the specific `1/k²` cap used here is the form adopted by recent
+derivative-free projection methods (see References).
 
 ```jldoctest
 julia> Inertial().θ

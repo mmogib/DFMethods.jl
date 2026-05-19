@@ -125,10 +125,11 @@ Three built-in strategies ship:
 | [`DirectUpdate`](@ref)            | $x_{k+1} = P_X(z_k)$                                          |
 | [`HalpernUpdate`](@ref)`(β)`      | $x_{k+1} = \beta\, x_0 + (1-\beta)\, z_k$ (scalar or schedule) |
 
-`SolodovSvaiterProjection` reproduces Ibrahim 2026 step by step.
-`DirectUpdate` is the simplest baseline. `HalpernUpdate` admits both a
-constant $\beta$ and a callable schedule $k \mapsto \beta(k)$ such as
-$\beta(k) = 1/(k+2)$ for the classical Halpern iteration.
+`SolodovSvaiterProjection` implements the hyperplane projection scheme
+of Solodov & Svaiter (1999). `DirectUpdate` is the simplest baseline.
+`HalpernUpdate` admits both a constant $\beta$ and a callable schedule
+$k \mapsto \beta(k)$ such as $\beta(k) = 1/(k+2)$ for the classical
+Halpern iteration (Halpern 1967).
 
 A custom strategy supplies its own `update_iterate!`; if it needs
 per-solve state, also overload `init_state(::MyUpdate, prob, x0, alg)`.
@@ -149,7 +150,7 @@ NoInertial()     # w_k = x_k; disables inertia
 The empirical importance of `Inertial(θ)` is non-trivial. On Dai 2015
 P4 at $n = 1000$, switching `Inertial(0.25) → NoInertial()` slowed the
 MPRPL direction from a median of 76 iterations to 296 — a factor of nearly
-four. The default setting reproduces Ibrahim 2026's experimental setup;
+four. `Inertial(0.25)` is a common default in the literature;
 `NoInertial()` is appropriate when comparing against a paper whose
 algorithm has no inertia (e.g. the Abubakar 2022 NHSCG demo in
 `benchmarks/scripts/s06_abubakar2022_nhscg.jl`).
@@ -255,7 +256,8 @@ the user's code.
 
 ### Violating the theoretical premises
 
-The convergence theorem of Ibrahim 2026 requires:
+A representative convergence theorem for this class of algorithms
+requires:
 
 - a search direction with sufficient descent
   ($-F(w)^\top d \geq c\|F(w)\|^2$) and bounded norm

@@ -95,7 +95,7 @@ B = BoxSet(fill(-1.0, 100), fill(1.0, 100))
 # Halfspace {x : ∑x_i ≤ 0.5}
 H = HalfSpace(ones(100), 0.5)
 
-# Their intersection — closed-form (matches Ibrahim 2026's Ω):
+# Their intersection — closed-form via the dedicated CappedBox set:
 Ω = CappedBox(-1.0, 1.0, 0.5)
 
 # … or generic Dykstra fallback for arbitrary convex pairs:
@@ -126,7 +126,7 @@ is an allocating wrapper around [`project!`](@ref).
 
 ## Choosing between `Intersection` and `CappedBox`
 
-For Ibrahim 2026's polyhedral $\Omega(a, b, c) = [a,b]^n \cap \{\sum x_i \leq
+For the polyhedral set $\Omega(a, b, c) = [a,b]^n \cap \{\sum x_i \leq
 c\}$, always prefer [`CappedBox`](@ref): one closed-form bisection per
 projection ($O(n \log \text{iter})$), significantly faster than Dykstra's
 alternation. Use [`Intersection`](@ref) when the constraint is not of this

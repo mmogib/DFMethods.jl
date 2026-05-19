@@ -23,9 +23,9 @@ using LineSearch
 #   - implement `direction!(d, rule, ctx)` where `ctx` is a NamedTuple with
 #     fields Fw, Fw_prev, w, w_prev, d_prev, k, α_prev (see docstring).
 #
-# The convergence theory of Ibrahim 2026 (Thm 3.1) requires the direction
-# to satisfy sufficient descent (eq. 3) and boundedness (eq. 4). MPRPL
-# satisfies both — see Dai 2015 §3.
+# The convergence theory for this class of algorithms requires the
+# direction to satisfy sufficient descent and boundedness conditions.
+# MPRPL satisfies both — see Dai 2015 §3.
 #
 # Formula (k ≥ 1):
 #   y_{k-1}   = F(w_k) - F(w_{k-1})
@@ -198,10 +198,10 @@ println("  F evals  = $(sol_default.stats.nf)")
 # Theoretical caveat
 # ============================================================================
 #
-# The framework's convergence theorem (Ibrahim 2026 Thm 3.1) holds when:
-#   - the direction satisfies eqs. (3)–(4) (sufficient descent + bounded);
+# A representative convergence theorem for this framework holds when:
+#   - the direction satisfies sufficient descent and boundedness;
 #   - the line search γ_k is bounded below by a positive constant on
-#     bounded sets and fits the unified form eq. (7).
+#     bounded sets.
 #
 # SpectralThreeTerm and MPRPL both satisfy the direction conditions (proved in
 # their respective papers). LSPower with p > 0 satisfies γ_k > 0 whenever

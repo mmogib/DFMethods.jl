@@ -54,15 +54,13 @@ line-search dispatch, and overhauls the documentation.
 
 ## [0.1.0] — 2026-05-17
 
-First public release. Implements **UIDFPAF** (Unified Inertial Derivative-Free
-Projection Algorithmic Framework) of Ibrahim, Alshahrani, Al-Homidan
-(*Journal of Optimization Theory and Applications* **208**:11, 2026)
-for constrained nonlinear equations F(x) = 0 on a closed convex set X.
+First public release. A configurable derivative-free projection algorithm
+for constrained nonlinear equations $F(x) = 0$ on a closed convex set $X$.
 
 ### Added
 - `DFProjection` algorithm with pluggable components:
-  - **Search direction**: `AbstractSearchDirection`, with `SpectralThreeTerm` (paper default) and the `direction!(d, rule, ctx)` user-extension API.
-  - **Line search**: `AbstractDFLineSearch`, with `LSI`–`LSVII` (seven variants from the paper) and the `gamma_k(rule, F_z)` user-extension API.
+  - **Search direction**: `AbstractSearchDirection`, with `SpectralThreeTerm` as the default and the `direction!(d, rule, ctx)` user-extension API.
+  - **Line search**: `AbstractDFLineSearch`, with seven variants `LSI`–`LSVII` and the `gamma_k(rule, F_z)` user-extension API.
   - **Inertial rule**: `AbstractInertialRule`, with `Inertial(θ)` and `NoInertial()`.
   - **Constraint set**: `AbstractConstraintSet`, with `RealSpace`, `BoxSet`, `HalfSpace`, `CappedBox`, `Intersection` (Dykstra), `UserSet`.
   - **Stopping criteria**: `AbstractStoppingCriterion`, with `AbsResidualTol`, `RelResidualTol`, `StepNormTol`, `DirectionNormTol`, `MaxIters`, `MaxTime`, `MaxFEvals`, `UserStop`, and the `AnyOf` composite.
@@ -83,13 +81,6 @@ for constrained nonlinear equations F(x) = 0 on a closed convex set X.
 - Julia ≥ 1.10
 - `SciMLBase` v2.x
 - `CommonSolve` v0.2.x
-
-### Citation
-If you use DFMethods.jl in research, please cite the source paper:
-> Ibrahim, A. H., Alshahrani, M., & Al-Homidan, S. (2026).
-> *A Unified Derivative-Free Projection Framework for Convex-Constrained Nonlinear Equations.*
-> Journal of Optimization Theory and Applications **208**:11.
-> [doi:10.1007/s10957-025-02826-x](https://doi.org/10.1007/s10957-025-02826-x)
 
 [Unreleased]: https://github.com/mmogib/DFMethods.jl/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.1.0

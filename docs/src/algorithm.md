@@ -148,11 +148,12 @@ assumptions:
   bounded subsets of $X$.
 
 Under these assumptions the iterates produced by `step!` converge to a
-solution of $F(u) = 0$ in $X$. The precise statement and proof for the
-unified framework underlying this package are given in [Ibrahim, Alshahrani,
-Al-Homidan 2026, Thm 3.1] — see [References](@ref); related theorems for
-constituent variants (Solodov–Svaiter projection, spectral-CG directions,
-etc.) appear in the cited literature.
+solution of $F(u) = 0$ in $X$. A representative unified convergence
+result covering this family of configurations is given in [Ibrahim,
+Alshahrani, Al-Homidan 2026, Thm 3.1] — see [References](@ref);
+component-specific convergence results (Solodov–Svaiter projection,
+spectral-CG directions, Halpern anchoring, etc.) appear in the
+respective originating works.
 
 The library does not enforce these assumptions at runtime. Iteration
 proceeds regardless of whether they are satisfied. Users supplying custom

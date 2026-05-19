@@ -1,6 +1,6 @@
 # projection.jl — Approximate projection onto X ∩ H_k.
 #
-# The paper's projection step (eq. 5) projects the target
+# The Solodov–Svaiter projection step projects the target
 #     t = w_k - λ_k F(z_k)
 # onto X ∩ H_k where
 #     H_k = {x : F(z_k)' (x - z_k) ≤ 0}

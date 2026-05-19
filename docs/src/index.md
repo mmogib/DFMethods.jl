@@ -27,9 +27,9 @@ projecting onto $X$).
 
 The package is organized as a configurable framework: each step of an
 outer iteration — inertial extrapolation, search direction, line search,
-hyperplane construction, projection / iterate update, stopping rule — is
-an independently pluggable component. Users can swap in custom rules at
-each step without touching the solver core. See [Algorithm](@ref) for the
+trial point, iterate update, stopping rule — is an independently
+pluggable component. Users can swap in custom rules at each step
+without touching the solver core. See [Algorithm](@ref) for the
 structure and [Extending](@ref) for the contracts.
 
 ## When to use it
@@ -46,12 +46,14 @@ DFMethods.jl is appropriate when:
 For problems outside these conditions, see [Comparisons](@ref) for a
 discussion of related packages.
 
-| | Constrained? | Derivative-free? | CG / projection-based? |
+| | Constrained? | Derivative-free? | Approach |
 |---|---|---|---|
-| `NonlinearSolve.SimpleDFSane` | ✗ | ✓ | ✗ |
-| `NLboxsolve.jl` | box only | ✗ | ✗ |
-| `ProximalAlgorithms.jl`, `SPGBox.jl` | ✓ | ✗ | ✗ (minimization) |
-| **DFMethods.jl** | **general convex** | **✓** | **✓** |
+| NonlinearSolve.jl `DFSane` / `SimpleDFSane` | ✗ | ✓ | spectral residual |
+| NonlinearSolve.jl `Broyden` / `Klement` / `LimitedMemoryBroyden` | ✗ | ✓ (secant) | quasi-Newton |
+| NonlinearSolve.jl JFNK (Newton + Krylov) | ✗ | ✓ (matrix-free) | Newton–Krylov |
+| `NLboxsolve.jl` | box only | ✗ | Newton/QN |
+| `ProximalAlgorithms.jl`, `SPGBox.jl` | ✓ | ✗ | minimization |
+| **DFMethods.jl** | **any closed convex (incl. ℝⁿ)** | **✓** | **projection-based** |
 
 ## Quick navigation
 
@@ -88,9 +90,9 @@ Box constraints are passed to the problem (`NonlinearProblem(F, u0; lb,
 ub)`); other convex sets use [`ConstrainedNonlinearProblem`](@ref). See
 [Constraint Sets](@ref).
 
-## Reference
+## Theoretical lineage
 
-The package's unified framework formulation and default configuration
-follow Ibrahim, Alshahrani, and Al-Homidan (2026); the broader Solodov–
-Svaiter projection family it generalizes is several decades older.
-Citations are listed on [References](@ref).
+The package's components draw on a body of literature on Solodov–Svaiter-
+style projection methods, derivative-free spectral-residual methods, the
+Halpern anchoring iteration, and inertial extrapolation for monotone
+operators. See [References](@ref) for the full lineage.

@@ -91,11 +91,11 @@ See the [Quickstart](https://mmogib.github.io/DFMethods.jl/stable/quickstart/) a
 
 ## Algorithm
 
-The package implements the unified derivative-free projection framework analysed in
+A configurable framework for derivative-free projection methods. One outer iteration:
 
-> Ibrahim, A. H., Alshahrani, M., & Al-Homidan, S. (2026). *A Unified Derivative-Free Projection Framework for Convex-Constrained Nonlinear Equations.* Journal of Optimization Theory and Applications, **208**:11. <https://doi.org/10.1007/s10957-025-02826-x>
+> inertial extrapolation → derivative-free search direction → backtracking line search → trial point → iterate update (Solodov–Svaiter hyperplane projection, direct projection, or Halpern anchoring).
 
-One outer iteration: inertial extrapolation → derivative-free search direction → backtracking line search → trial point → iterate update (Solodov–Svaiter hyperplane projection, direct projection, or Halpern anchoring).
+The mathematical components — Solodov–Svaiter hyperplane projection, Halpern anchoring, spectral-residual derivative-free directions, inertial extrapolation for monotone operators — draw on a body of literature spanning several decades. See the [References](https://mmogib.github.io/DFMethods.jl/stable/references/) page of the docs for the lineage of each component.
 
 ## Pluggable components
 
@@ -112,19 +112,9 @@ Each is a small struct with one required method; see the [Extending](https://mmo
 
 ## Citation
 
-If you use DFMethods.jl in research, please cite:
+If you use DFMethods.jl in research, please cite **the software**. A formal software-citation entry (`@software{...}` with a Zenodo DOI) will accompany the first tagged release; until then, please cite the package by name, version, and the GitHub URL `https://github.com/mmogib/DFMethods.jl`.
 
-```bibtex
-@article{ibrahim_unified_2026,
-  title   = {A Unified Derivative-Free Projection Framework for Convex-Constrained Nonlinear Equations},
-  author  = {Ibrahim, Abdulkarim Hassan and Alshahrani, Mohammed and Al-Homidan, Suliman},
-  journal = {Journal of Optimization Theory and Applications},
-  volume  = {208},
-  number  = {11},
-  year    = {2026},
-  doi     = {10.1007/s10957-025-02826-x},
-}
-```
+The package implements components drawn from a body of theoretical literature. If you build on a specific component or rely on a specific convergence result, please additionally cite the originating source; see the [References](https://mmogib.github.io/DFMethods.jl/stable/references/) page of the docs.
 
 ## License
 

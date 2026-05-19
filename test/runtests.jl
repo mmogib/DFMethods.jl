@@ -55,7 +55,7 @@ end
             @test_throws ArgumentError HalfSpace([0.0, 0.0], 1.0)
         end
 
-        @testset "CappedBox (Ibrahim 2026 Ω)" begin
+        @testset "CappedBox (polyhedral Ω)" begin
             ω = CappedBox(-1.0, 1.0, 1.0)
             # Case 1: x already inside Ω (sum 0.7 ≤ 1)
             @test project([0.3, 0.4], ω) ≈ [0.3, 0.4]
