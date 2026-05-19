@@ -19,14 +19,16 @@ A generic derivative-free projection framework with pluggable search direction, 
 
 ## Where it sits in the Julia ecosystem
 
-| | Constrained? | Derivative-free? | CG / projection-based? |
+| | Constrained? | Derivative-free? | Approach |
 |---|---|---|---|
-| NonlinearSolve.jl (`SimpleDFSane`) | ✗ | ✓ | ✗ (spectral residual) |
-| NLboxsolve.jl | box only | ✗ | ✗ |
-| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | ✗ (minimization, not $F(x)=0$) |
-| **DFMethods.jl** | **general convex** | **✓** | **✓ (projection-family)** |
+| NonlinearSolve.jl `DFSane` / `SimpleDFSane` | ✗ | ✓ | spectral residual |
+| NonlinearSolve.jl `Broyden` / `Klement` / `LimitedMemoryBroyden` | ✗ (incl. box for some) | ✓ (secant) | quasi-Newton |
+| NonlinearSolve.jl JFNK (Newton + Krylov) | ✗ | ✓ (matrix-free) | Newton–Krylov |
+| NLboxsolve.jl | box only | ✗ | Newton/QN |
+| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | minimization |
+| **DFMethods.jl** | **any closed convex (incl. ℝⁿ)** | **✓** | **projection-based** |
 
-First Julia implementation of the Solodov–Svaiter hyperplane-projection family with derivative-free CG-style search directions, plus alternative iterate-update strategies (direct projection, Halpern anchoring), and fully pluggable line search / inertia / constraint set / callbacks.
+DFMethods.jl complements the SciML-native derivative-free options (spectral-residual DF-SANE, quasi-Newton secant methods, matrix-free Newton–Krylov) — all of which target the unconstrained case — by extending the problem class to **any closed convex feasibility set** under a (pseudo-)monotone $F$, with the unconstrained case recovered as $X = \mathbb{R}^n$ (where $P_X = \mathrm{id}$). The framework offers derivative-free CG-style search directions, three pluggable iterate-update strategies (Solodov–Svaiter hyperplane projection, direct projection, Halpern anchoring), and pluggable line search / inertia / constraint set / callbacks.
 
 ## Install
 
