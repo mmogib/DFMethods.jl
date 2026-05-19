@@ -6,17 +6,17 @@ using CommonSolve
 using LineSearch
 
 # ── Includes (dependency order) ──────────────────────────────────────────────
-include("types.jl")                       # AbstractDFProjection + traits
+include("types.jl")                       # AbstractDFProjection, ConstrainedNonlinearProblem, init_state, AbstractCallback contracts
 include("constraint_sets.jl")             # Sets + exact projections
 include("inertial.jl")                    # Inertial extrapolation rules
 include("search_directions.jl")           # AbstractSearchDirection + SpectralThreeTerm
-include("line_searches.jl")               # AbstractDFLineSearch + LSI..LSVII
+include("line_searches.jl")               # ConstantBacktrack, ResidualNormBacktrack, AdaptiveClampedBacktrack (LineSearch.jl-aligned)
 include("projection.jl")                  # Approximate projection onto X ∩ H_k
 include("iterate_updates.jl")             # AbstractIterateUpdate + Solodov–Svaiter / Direct / Halpern
-include("stopping_criteria.jl")           # AbstractStoppingCriterion + variants (callbacks)
-include("callbacks.jl")                   # HistoryCallback, LoggingCallback
+include("stopping_criteria.jl")           # AbstractStoppingCriterion + 9 criteria, on_event!-dispatched
+include("callbacks.jl")                   # HistoryCallback, LoggingCallback, HISTORY_FIELDS
 include("algorithm.jl")                   # DFProjection + cache + step!
-include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
+include("nonlinearsolve_integration.jl")  # CommonSolve.init/solve! + SciMLBase.__solve dispatch
 
 # ── Exports ──────────────────────────────────────────────────────────────────
 export

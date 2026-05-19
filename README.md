@@ -9,13 +9,13 @@
 
 Solve
 
-$$\text{Find } u^* \in X \subset \mathbb{R}^n \text{ such that } \psi(u^*) = 0,$$
+$$\text{Find } u^* \in X \subset \mathbb{R}^n \text{ such that } F(u^*) = 0,$$
 
-where $X$ is closed convex and $\psi$ is continuous and (pseudo-)monotone. **No derivatives required.**
+where $X$ is closed convex and $F$ is continuous and (pseudo-)monotone. **No derivatives required.**
 
 ## Status
 
-v0.1.0 — first registered release. Public API stable. Documentation and full benchmark suite in progress.
+A generic derivative-free projection framework with pluggable search direction, line search, iterate-update strategy, inertial rule, constraint set, and callbacks. The algorithm itself is problem-agnostic; the feasible set is a property of the problem, not the algorithm. See [`CHANGELOG.md`](CHANGELOG.md) for the per-version capability surface.
 
 ## Where it sits in the Julia ecosystem
 
@@ -23,10 +23,10 @@ v0.1.0 — first registered release. Public API stable. Documentation and full b
 |---|---|---|---|
 | NonlinearSolve.jl (`SimpleDFSane`) | ✗ | ✓ | ✗ (spectral residual) |
 | NLboxsolve.jl | box only | ✗ | ✗ |
-| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | ✗ (minimization, not $\psi(x)=0$) |
-| **DFMethods.jl** | **general convex** | **✓** | **✓ (Solodov–Svaiter)** |
+| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | ✗ (minimization, not $F(x)=0$) |
+| **DFMethods.jl** | **general convex** | **✓** | **✓ (projection-family)** |
 
-First Julia implementation of the Solodov–Svaiter hyperplane-projection family with derivative-free CG-style search directions and pluggable line search / inertia / constraint set.
+First Julia implementation of the Solodov–Svaiter hyperplane-projection family with derivative-free CG-style search directions, plus alternative iterate-update strategies (direct projection, Halpern anchoring), and fully pluggable line search / inertia / constraint set / callbacks.
 
 ## Install
 
@@ -58,39 +58,55 @@ using NonlinearSolve, DFMethods
 # F : R^n → R^n  (out-of-place; in-place f!(du, u, p) also supported)
 F(u, p) = u .- p
 
-# NonlinearProblem with target p = [0.3, -0.2]
+# Unconstrained
 prob = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2])
-
-# Constrained to the box [-1, 1]²
-alg = DFProjection(; set = BoxSet([-1.0, -1.0], [1.0, 1.0]))
-
-sol = solve(prob, alg)
+sol  = solve(prob, DFProjection())
 sol.u             # ≈ [0.3, -0.2]
 sol.retcode       # ReturnCode.Success
 sol.stats.nf      # number of F evaluations
 sol.stats.nsteps  # outer iterations
 ```
 
-See `examples/extending.jl` for how to define your own search direction and line search.
+Box constraints flow through SciML's standard `lb` / `ub` kwargs:
+
+```julia
+prob_box = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2];
+                            lb = [-1.0, -1.0], ub = [1.0, 1.0])
+sol_box  = solve(prob_box, DFProjection())
+```
+
+For arbitrary closed convex sets, wrap with `ConstrainedNonlinearProblem`:
+
+```julia
+inner = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2])
+prob_hs = ConstrainedNonlinearProblem(inner, HalfSpace([1.0, 1.0], 0.5))
+sol_hs  = solve(prob_hs, DFProjection())
+```
+
+The same `DFProjection()` instance solves all three problems — the constraint set lives on the problem.
+
+See the [Quickstart](https://mmogib.github.io/DFMethods.jl/stable/quickstart/) and [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) pages of the docs for callbacks, custom directions / line searches, and lower-level access.
 
 ## Algorithm
 
-Implements **UIDFPAF** — the *Unified Inertial Derivative-Free Projection Algorithmic Framework* from
+The package implements the unified derivative-free projection framework analysed in
 
 > Ibrahim, A. H., Alshahrani, M., & Al-Homidan, S. (2026). *A Unified Derivative-Free Projection Framework for Convex-Constrained Nonlinear Equations.* Journal of Optimization Theory and Applications, **208**:11. <https://doi.org/10.1007/s10957-025-02826-x>
 
-One outer iteration: inertial extrapolation → derivative-free direction → backtracking line search → trial-point check → hyperplane projection → approximate projection onto $X \cap H_k$.
+One outer iteration: inertial extrapolation → derivative-free search direction → backtracking line search → trial point → iterate update (Solodov–Svaiter hyperplane projection, direct projection, or Halpern anchoring).
 
 ## Pluggable components
 
 | Component | Abstract type | Built-in instances |
 |---|---|---|
 | Search direction | `AbstractSearchDirection` | `SpectralThreeTerm` |
-| Line search | `AbstractDFLineSearch` | `LSI`, `LSII`, `LSIII`, `LSIV`, `LSV`, `LSVI`, `LSVII` |
+| Line search | `LineSearch.AbstractLineSearchAlgorithm` | `ConstantBacktrack`, `ResidualNormBacktrack`, `AdaptiveClampedBacktrack` |
+| Iterate update | `AbstractIterateUpdate` | `SolodovSvaiterProjection`, `DirectUpdate`, `HalpernUpdate` |
 | Inertial rule | `AbstractInertialRule` | `Inertial(θ)`, `NoInertial` |
-| Constraint set | `AbstractConstraintSet` | `RealSpace`, `BoxSet`, `HalfSpace`, `Intersection`, `CappedBox`, `UserSet` |
+| Constraint set (on the problem) | `AbstractConstraintSet` | `RealSpace`, `BoxSet`, `HalfSpace`, `Intersection`, `CappedBox`, `UserSet` |
+| Stopping / observers | `AbstractCallback` | `AbsResidualTol`, `RelResidualTol`, `MaxIters`, `MaxTime`, `MaxFEvals`, `HistoryCallback`, `LoggingCallback`, … |
 
-Each is a small struct with one required method; see the *Extending* page of the docs.
+Each is a small struct with one required method; see the [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) page of the docs.
 
 ## Citation
 
