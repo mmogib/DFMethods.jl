@@ -13,7 +13,7 @@ SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 [compat]
 CommonSolve = "0.2"
 LineSearch = "0.1"
-SciMLBase = "2.53"
+SciMLBase = "2.53, 3.13"
 julia = "1.10"
 
 [extras]
