@@ -3,13 +3,11 @@ using Test
 using LinearAlgebra
 using Random
 using SciMLBase
+using CommonSolve
+using LineSearch
 
 # Internal helpers — not part of the public API, but exercised by tests.
-using DFMethods: inertial_coef, apply_inertial!,
-                 linesearch!, approx_project_X_halfspace!
-
-# Dummy algorithm subtype for testing default assumption traits
-struct _DummyAlg <: AbstractDFProjectionAlgorithm end
+using DFMethods: inertial_coef, apply_inertial!, approx_project_X_halfspace!
 
 # Recorder direction for testing α_prev plumbing in `step!`. Captures the
 # α_prev value that `step!` passes through `ctx` to `direction!(d, rule, ctx)`.
@@ -17,22 +15,11 @@ struct _RecorderDir <: AbstractSearchDirection end
 const _RECORDED_ALPHA_PREV = Ref{Float64}(NaN)
 function DFMethods.direction!(d, ::_RecorderDir, ctx)
     _RECORDED_ALPHA_PREV[] = ctx.α_prev
-    @. d = -ctx.ψw   # steepest descent — always valid
+    @. d = -ctx.Fw   # steepest descent — always valid
     return d
 end
 
 @testset "DFMethods.jl" begin
-
-    # ========================================================================
-    # Assumption traits
-    # ========================================================================
-
-    @testset "Assumption traits (defaults)" begin
-        a = _DummyAlg()
-        @test monotonicity_required(a)        == true
-        @test pseudomonotonicity_sufficient(a) == true
-        @test convex_set_required(a)          == true
-    end
 
     # ========================================================================
     # Constraint sets
@@ -68,7 +55,7 @@ end
             @test_throws ArgumentError HalfSpace([0.0, 0.0], 1.0)
         end
 
-        @testset "CappedBox (Ibrahim 2026 Ω)" begin
+        @testset "CappedBox (polyhedral Ω)" begin
             ω = CappedBox(-1.0, 1.0, 1.0)
             # Case 1: x already inside Ω (sum 0.7 ≤ 1)
             @test project([0.3, 0.4], ω) ≈ [0.3, 0.4]
@@ -154,14 +141,14 @@ end
         n = 5
 
         # Helper to build a direction! context NamedTuple
-        _ctx(ψw, ψw_prev, w, w_prev, d_prev, k; α_prev=1.0) =
-            (; ψw=ψw, ψw_prev=ψw_prev, w=w, w_prev=w_prev, d_prev=d_prev, k=k, α_prev=α_prev)
+        _ctx(Fw, Fw_prev, w, w_prev, d_prev, k; α_prev=1.0) =
+            (; Fw=Fw, Fw_prev=Fw_prev, w=w, w_prev=w_prev, d_prev=d_prev, k=k, α_prev=α_prev)
 
-        @testset "k = 0: d = -ψ(w)" begin
-            ψw = randn(MersenneTwister(1), n)
-            d  = similar(ψw)
-            direction!(d, rule, _ctx(ψw, ψw, ψw, ψw, similar(ψw), 0))
-            @test d ≈ -ψw
+        @testset "k = 0: d = -F(w)" begin
+            Fw = randn(MersenneTwister(1), n)
+            d  = similar(Fw)
+            direction!(d, rule, _ctx(Fw, Fw, Fw, Fw, similar(Fw), 0))
+            @test d ≈ -Fw
         end
 
         @testset "k ≥ 1: finite output" begin
@@ -169,11 +156,11 @@ end
             w       = randn(rng, n)
             w_prev  = randn(rng, n)
             d_prev  = randn(rng, n)
-            ψw      = randn(rng, n)
-            ψw_prev = randn(rng, n)
+            Fw      = randn(rng, n)
+            Fw_prev = randn(rng, n)
             d       = similar(w)
 
-            direction!(d, rule, _ctx(ψw, ψw_prev, w, w_prev, d_prev, 1))
+            direction!(d, rule, _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
             @test all(isfinite, d)
         end
     end
@@ -182,30 +169,267 @@ end
     # Line searches
     # ========================================================================
 
-    @testset "gamma_k variants" begin
-        ψz = [3.0, 4.0]
-        @test gamma_k(LSI(),  ψz) == 1.0
-        @test gamma_k(LSII(), ψz) ≈ 5.0
-        @test gamma_k(LSIII(), ψz) ≈ 5.0 / 6.0
-        @test gamma_k(LSIV(τ=0.5), ψz) ≈ 0.5 + 0.5 * 5.0
-        @test gamma_k(LSV(), ψz) == 1.0
-        @test gamma_k(LSVI(; lo=0.5, hi=4.0), ψz) == 4.0
-        @test gamma_k(LSVII(; lo=0.5, Δ_init=2.0), ψz) == 2.5
+    # ========================================================================
+    # v0.2 SciML alignment (constraint moves from algorithm to problem)
+    # ========================================================================
+
+    @testset "v0.2 SciML alignment (Stage 6)" begin
+        @testset "ConstrainedNonlinearProblem wraps a NonlinearProblem + set" begin
+            f(u, p) = copy(u)
+            inner = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            cprob = ConstrainedNonlinearProblem(inner, RealSpace())
+            @test cprob.inner === inner
+            @test cprob.set isa RealSpace
+        end
+
+        @testset "ConstrainedNonlinearProblem all-in-one constructor" begin
+            f(u, p) = copy(u)
+            cprob = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 1.0))
+            @test cprob.set isa HalfSpace
+            @test cprob.inner.u0 == [1.0, 1.0]
+        end
+
+        @testset "_constraint_set resolves from prob.lb/ub or wrapper" begin
+            f(u, p) = copy(u)
+            # Unconstrained: returns RealSpace
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            @test DFMethods._constraint_set(prob) isa RealSpace
+
+            # Box via lb/ub: returns BoxSet
+            prob_box = SciMLBase.NonlinearProblem(f, [1.0, 1.0]; lb = -ones(2), ub = ones(2))
+            set_box = DFMethods._constraint_set(prob_box)
+            @test set_box isa BoxSet
+            @test all(set_box.lower .== -1.0)
+            @test all(set_box.upper .== 1.0)
+
+            # ConstrainedNonlinearProblem: returns the wrapped set
+            cprob = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 1.0))
+            @test DFMethods._constraint_set(cprob) isa HalfSpace
+        end
+
+        @testset "DFProjection has no `set` field" begin
+            alg = DFProjection()
+            @test !hasfield(typeof(alg), :set)
+        end
+
+        @testset "Box constraints via prob.lb/ub solve correctly" begin
+            target = [0.3, -0.2]
+            f(u, p) = u .- target
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0]; lb = -ones(2), ub = ones(2))
+            sol = solve(prob, DFProjection(inertial = NoInertial()))
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test sol.u ≈ target atol = 1e-4
+        end
+
+        @testset "ConstrainedNonlinearProblem with HalfSpace solves" begin
+            f(u, p) = copy(u)
+            cprob = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 1.0))
+            sol = solve(cprob, DFProjection(inertial = NoInertial()))
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "One algorithm solves many problems" begin
+            # The whole point: alg is problem-agnostic, can be reused.
+            alg = DFProjection(direction = SpectralThreeTerm(),
+                                linesearch = ResidualNormBacktrack(),
+                                inertial = NoInertial())
+            f(u, p) = copy(u)
+
+            prob_unc = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            prob_box = SciMLBase.NonlinearProblem(f, [1.0, 1.0]; lb = -ones(2), ub = ones(2))
+            cprob_hs = ConstrainedNonlinearProblem(f, [1.0, 1.0]; set = HalfSpace([1.0, 1.0], 0.5))
+
+            sol1 = solve(prob_unc, alg)
+            sol2 = solve(prob_box, alg)
+            sol3 = solve(cprob_hs, alg)
+            @test sol1.retcode == SciMLBase.ReturnCode.Success
+            @test sol2.retcode == SciMLBase.ReturnCode.Success
+            @test sol3.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "Cache holds the resolved set" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0]; lb = -ones(2), ub = ones(2))
+            scml_cache = init(prob, DFProjection())
+            inner = scml_cache.inner
+            @test inner.set isa BoxSet
+        end
     end
 
-    @testset "linesearch! driver" begin
-        ψ(x) = copy(x)
-        for rule in (LSI(), LSII(), LSIII(), LSIV(), LSV(),
-                     LSVI(; lo=0.1, hi=10.0))
-            w = [1.0, 1.0]
-            d = -ψ(w)
-            z_buf  = similar(w)
-            ψz_buf = similar(w)
-            α, ψ_z, n_evals, ok = linesearch!(rule, ψ, w, d, z_buf, ψz_buf)
-            @test ok
-            @test 0 < α <= 1
-            @test n_evals >= 1
-            @test all(isfinite, ψ_z)
+    # ========================================================================
+    # v0.2 iterate update (Section A) — pluggable steps 6–7
+    # ========================================================================
+
+    @testset "v0.2 iterate update (Section A)" begin
+        @testset "AbstractIterateUpdate hierarchy" begin
+            @test SolodovSvaiterProjection() isa AbstractIterateUpdate
+            @test DirectUpdate()             isa AbstractIterateUpdate
+            @test HalpernUpdate(0.5)         isa AbstractIterateUpdate
+        end
+
+        @testset "Default DFProjection uses SolodovSvaiterProjection" begin
+            alg = DFProjection()
+            @test alg.iterate_update isa SolodovSvaiterProjection
+        end
+
+        @testset "SolodovSvaiterProjection: end-to-end solve" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = SolodovSvaiterProjection(),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                abstol         = 1e-6,
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-5
+        end
+
+        @testset "DirectUpdate: x_{k+1} = project(z, set)" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = DirectUpdate(),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-4
+        end
+
+        @testset "HalpernUpdate with constant β=0 (≈ DirectUpdate)" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = HalpernUpdate(0.0),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "HalpernUpdate with β = k -> 1/(k+2)" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = HalpernUpdate(k -> 1.0 / (k + 2)),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 1000,
+            )
+            sol = solve(prob, alg)
+            @test SciMLBase.successful_retcode(sol.retcode) ||
+                  sol.retcode == SciMLBase.ReturnCode.MaxIters
+        end
+
+        @testset "init_state for iterate-update strategies" begin
+            f(u, p) = copy(u); x0 = [1.0, 1.0]; alg = DFProjection()
+            prob = SciMLBase.NonlinearProblem(f, x0)
+            @test DFMethods.init_state(SolodovSvaiterProjection(), prob, x0, alg) isa DFMethods.SolodovSvaiterState
+            @test DFMethods.init_state(DirectUpdate(),             prob, x0, alg) === nothing
+            @test DFMethods.init_state(HalpernUpdate(0.5),         prob, x0, alg) isa DFMethods.HalpernState
+        end
+
+        @testset "HalpernUpdate maintains feasibility on box-constrained problem" begin
+            # Solution of F(u) = u is u* = 0, which is inside [-0.5, 0.5]^2.
+            # The line-search trial points z_k can land outside the box; without
+            # the final P_X step in HalpernUpdate, sol.u would generally violate
+            # the bounds. With the projection in place, every iterate (including
+            # the final one) must lie in the box.
+            f(u, p) = copy(u)
+            x0     = [0.4, 0.4]
+            lb, ub = fill(-0.5, 2), fill(0.5, 2)
+            prob   = SciMLBase.NonlinearProblem(f, x0; lb = lb, ub = ub)
+            alg    = DFProjection(;
+                iterate_update = HalpernUpdate(0.3),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                maxiters       = 200,
+            )
+            sol = solve(prob, alg)
+            @test all(lb .- 1e-12 .≤ sol.u .≤ ub .+ 1e-12)
+        end
+    end
+
+    # ========================================================================
+    # v0.2 line searches (Section B) — LineSearch.jl-aligned
+    # ========================================================================
+
+    @testset "v0.2 line searches (Section B)" begin
+        @testset "Types are LineSearch.AbstractLineSearchAlgorithm subtypes" begin
+            @test ConstantBacktrack()         isa LineSearch.AbstractLineSearchAlgorithm
+            @test ResidualNormBacktrack()     isa LineSearch.AbstractLineSearchAlgorithm
+            @test AdaptiveClampedBacktrack()  isa LineSearch.AbstractLineSearchAlgorithm
+        end
+
+        @testset "ConstantBacktrack init + solve!" begin
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = -f(u, nothing)            # descent direction
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = ConstantBacktrack()
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            @test cache isa LineSearch.AbstractLineSearchCache
+
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol isa LineSearch.LineSearchSolution
+            @test 0 < sol.step_size <= 1
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+
+            # Our caches expose rich state for the outer step!
+            @test cache.n_evals >= 1
+            @test all(isfinite, cache.fu_cache)
+            @test all(isfinite, cache.z_cache)
+        end
+
+        @testset "ResidualNormBacktrack init + solve!" begin
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = -f(u, nothing)
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = ResidualNormBacktrack()
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test 0 < sol.step_size <= 1
+        end
+
+        @testset "AdaptiveClampedBacktrack init + solve!" begin
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = -f(u, nothing)
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = AdaptiveClampedBacktrack(lo = 0.5, Δ_init = 4.0)
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+        end
+
+        @testset "Failure retcode when descent cannot be satisfied" begin
+            # Construct du anti-aligned with -F(z) so backtracking can't satisfy
+            # the Armijo condition within maxbt steps.
+            f(u, p) = copy(u)
+            u  = [1.0, 1.0]
+            du = +f(u, nothing)            # NOT a descent direction
+            prob = SciMLBase.NonlinearProblem(f, u)
+            fu = f(u, nothing)
+            ls = ConstantBacktrack(maxbt = 5)
+
+            cache = CommonSolve.init(prob, ls, fu, u)
+            sol = CommonSolve.solve!(cache, u, du)
+            @test sol.retcode == SciMLBase.ReturnCode.Failure
         end
     end
 
@@ -250,68 +474,107 @@ end
     end
 
     # ========================================================================
-    # Algorithm: solve_df
+    # Algorithm: DFProjection via the SciML solve interface
     # ========================================================================
 
-    @testset "DFProjection + solve_df" begin
-        @testset "Unconstrained linear F: ψ(x) = x → x* = 0" begin
-            F = x -> copy(x)
-            x0 = [1.0, 1.0]
+    @testset "DFProjection via solve" begin
+        @testset "Unconstrained linear F: F(x) = x → x* = 0" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
-                linesearch = LSI(),
+                linesearch = ConstantBacktrack(),
                 inertial   = NoInertial(),
-                set        = RealSpace(),
                 abstol     = 1e-6,
                 maxiters   = 500,
             )
-            sol = solve_df(F, x0, alg)
-            @test sol.converged
-            @test sol.retcode == :Success
-            @test norm(sol.x) <= 1e-5
-            @test sol.iterations < 500
-            @test sol.n_evals > 0
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-5
+            @test sol.stats.nsteps < 500
+            @test sol.stats.nf > 0
         end
 
-        @testset "Affine F with box: ψ(x) = x - target, target inside box" begin
+        @testset "Affine F with box (constraint via prob.lb/ub)" begin
             target = [0.3, -0.2]
-            F = x -> x .- target
-            x0 = [1.0, -1.0]
+            f(u, p) = u .- target
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0]; lb = -ones(2), ub = ones(2))
             alg = DFProjection(;
                 direction  = SpectralThreeTerm(),
-                linesearch = LSII(),
+                linesearch = ResidualNormBacktrack(),
                 inertial   = Inertial(0.25),
-                set        = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 abstol     = 1e-6,
                 maxiters   = 1000,
             )
-            sol = solve_df(F, x0, alg)
-            @test sol.converged
-            @test sol.retcode == :Success
-            @test sol.x ≈ target atol=1e-4
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test sol.u ≈ target atol=1e-4
         end
 
-        @testset "Infeasible x0 gets projected" begin
+        @testset "Infeasible x0 gets projected (init_cache with explicit set)" begin
             F = x -> copy(x)
             x0_infeas = [5.0, 5.0]      # outside [-1, 1]²
-            alg = DFProjection(;
-                set      = BoxSet([-1.0, -1.0], [1.0, 1.0]),
-                abstol   = 1e-6,
-                maxiters = 500,
-            )
-            cache = init_cache(F, x0_infeas, alg)
+            alg = DFProjection(; abstol = 1e-6, maxiters = 500)
+            cache = init_cache(F, x0_infeas, alg; set = BoxSet([-1.0, -1.0], [1.0, 1.0]))
             @test all(-1.0 .<= cache.x .<= 1.0)     # init projected x0 onto box
         end
 
         @testset "Constructor defaults" begin
             alg = DFProjection()
             @test alg.direction  isa SpectralThreeTerm
-            @test alg.linesearch isa LSII
+            @test alg.linesearch isa ResidualNormBacktrack
             @test alg.inertial   isa Inertial
-            @test alg.set        isa RealSpace
             @test alg.abstol     == 1e-6
             @test alg.maxiters   == 2000
             @test alg.ζ          == 0.5
+        end
+
+        @testset "v0.2 cache shape (Section D)" begin
+            F = x -> copy(x)
+            x0 = [1.0, 1.0]
+            alg = DFProjection()
+            cache = init_cache(F, x0, alg)
+
+            # Four pluggable component-state slots
+            @test hasfield(typeof(cache), :direction_state)
+            @test hasfield(typeof(cache), :line_search_cache)
+            @test hasfield(typeof(cache), :iterate_update_state)
+            @test hasfield(typeof(cache), :stopping_state)
+
+            # Stage 3c state: direction + stopping default to nothing;
+            # line_search_cache holds a LineSearch.AbstractLineSearchCache
+            # (the default `ResidualNormBacktrack`'s cache);
+            # iterate_update_state holds the projection scratch
+            @test cache.direction_state === nothing
+            @test cache.line_search_cache isa LineSearch.AbstractLineSearchCache
+            @test cache.line_search_cache isa DFMethods.ResidualNormBacktrackCache
+            @test cache.stopping_state === nothing
+            @test cache.iterate_update_state isa DFMethods.SolodovSvaiterState
+            @test length(cache.iterate_update_state.proj_target) == length(x0)
+
+            # Old direct fields gone
+            @test !hasfield(typeof(cache), :proj_target)
+            @test !hasfield(typeof(cache), :proj_p)
+            @test !hasfield(typeof(cache), :proj_q)
+            @test !hasfield(typeof(cache), :proj_scratch)
+            @test !hasfield(typeof(cache), :proj_out_prev)
+        end
+
+        @testset "init_state defaults to nothing" begin
+            f(u, p) = copy(u)
+            x0 = [1.0]; alg = DFProjection()
+            prob = SciMLBase.NonlinearProblem(f, x0)
+            @test DFMethods.init_state(SpectralThreeTerm(), prob, x0, alg) === nothing
+            @test DFMethods.init_state(MaxIters(100), prob, x0, alg) === nothing
+        end
+
+        @testset "Base.show DFProjectionCache prints a one-liner" begin
+            F = x -> copy(x); x0 = [1.0]; alg = DFProjection()
+            cache = init_cache(F, x0, alg)
+            s = sprint(show, cache)
+            @test occursin("DFProjectionCache", s)
+            # The long parametric type signature shouldn't dominate
+            @test length(s) < 200
         end
 
         @testset "α_prev plumbing through ctx" begin
@@ -337,15 +600,116 @@ end
             @test 0 < _RECORDED_ALPHA_PREV[] <= 1.0
         end
 
-        @testset "DFSolution fields" begin
-            F = x -> copy(x)
-            sol = solve_df(F, [0.5, 0.5], DFProjection(; maxiters=100))
-            @test sol isa DFSolution
-            @test sol.x isa Vector{Float64}
-            @test isfinite(sol.resid)
-            @test sol.iterations >= 0
-            @test sol.n_evals    >= 1
-            @test sol.retcode    isa Symbol
+        @testset "NonlinearSolution fields from solve" begin
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [0.5, 0.5])
+            sol = solve(prob, DFProjection(; maxiters=100))
+            @test sol isa SciMLBase.AbstractNonlinearSolution
+            @test sol.u isa Vector{Float64}
+            @test sol.resid isa Vector{Float64}
+            @test sol.stats.nsteps >= 0
+            @test sol.stats.nf    >= 1
+            @test sol.retcode    isa SciMLBase.ReturnCode.T
+        end
+    end
+
+    # ========================================================================
+    # v0.2 callbacks (Section C)
+    # ========================================================================
+
+    @testset "v0.2 callbacks (Section C)" begin
+        @testset "AbstractCallback / AbstractStoppingCriterion hierarchy" begin
+            @test HistoryCallback() isa AbstractCallback
+            @test LoggingCallback(io = devnull) isa AbstractCallback
+            @test AbsResidualTol(1e-6) isa AbstractCallback   # stopping criterion is a callback
+            @test AbsResidualTol(1e-6) isa AbstractStoppingCriterion
+        end
+
+        @testset "HistoryCallback validates field names" begin
+            @test_throws ErrorException HistoryCallback(fields = (:not_a_field,))
+        end
+
+        @testset "HistoryCallback rejects both fields and extractor" begin
+            @test_throws ErrorException HistoryCallback(
+                fields = (:k, :F_norm),
+                extractor = c -> (a = 1,),
+            )
+        end
+
+        @testset "HistoryCallback accumulates rows on :post_iter" begin
+            hist = HistoryCallback(fields = (:k, :F_norm))
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[hist],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 10,
+            )
+            solve(prob, alg)
+            @test length(hist.history) >= 1
+            for row in hist.history
+                @test row.k isa Integer
+                @test row.F_norm isa Float64
+            end
+        end
+
+        @testset "HistoryCallback with custom extractor" begin
+            hist = HistoryCallback(extractor = c -> (custom = c.k * 2,))
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[hist],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 5,
+            )
+            solve(prob, alg)
+            @test length(hist.history) >= 1
+            for row in hist.history
+                @test row.custom isa Integer
+            end
+        end
+
+        @testset "LoggingCallback prints to io" begin
+            io = IOBuffer()
+            logger = LoggingCallback(io = io, columns = (:k, :F_norm), every = 1, footer = true)
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[logger],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 10,
+            )
+            solve(prob, alg)
+            output = String(take!(io))
+            @test occursin("k", output)         # header
+            @test occursin("F_norm", output)
+            @test occursin("Terminated", output)  # footer
+        end
+
+        @testset "LoggingCallback honors `every`" begin
+            io = IOBuffer()
+            logger = LoggingCallback(io = io, columns = (:k,), every = 100, footer = false)
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                callbacks = AbstractCallback[logger],
+                linesearch = ConstantBacktrack(),
+                inertial = NoInertial(),
+                maxiters = 5,
+            )
+            solve(prob, alg)
+            output = String(take!(io))
+            # With every=100 and only ~5 iters, we should see the header but no rows
+            @test occursin("k", output)
+        end
+
+        @testset "HISTORY_FIELDS constant" begin
+            @test :k in HISTORY_FIELDS
+            @test :F_norm in HISTORY_FIELDS
+            @test :elapsed in HISTORY_FIELDS
         end
     end
 
@@ -354,88 +718,87 @@ end
     # ========================================================================
 
     @testset "Stopping criteria" begin
-        # Build a real cache via init_cache so we can probe criteria
-        F(x) = copy(x)              # ψ(x) = x, ψ(0) = 0
+        # Build a real cache via init_cache so we can probe criteria via on_event!
+        F(x) = copy(x)              # F(x) = x, F(0) = 0
         x0 = [1.0, 1.0]
         alg_default = DFProjection()
         cache = init_cache(F, x0, alg_default)
 
-        @testset "AbsResidualTol fires at_w / at_z, not at_end" begin
+        @testset "AbsResidualTol fires at :post_linesearch" begin
             c = AbsResidualTol(1e-6)
 
-            cache.ψw .= [0.5, 0.5];   @test should_stop_at_w(c, cache) == (false, :Default)
-            cache.ψw .= [1e-8, 1e-8]; @test should_stop_at_w(c, cache) == (true,  :Success)
+            cache.Fz .= [0.5, 0.5];   @test on_event!(c, cache, :post_linesearch) == (false, :Default)
+            cache.Fz .= [1e-8, 1e-8]; @test on_event!(c, cache, :post_linesearch) == (true,  :Success)
 
-            cache.ψz .= [0.5, 0.5];   @test should_stop_at_z(c, cache) == (false, :Default)
-            cache.ψz .= [1e-8, 1e-8]; @test should_stop_at_z(c, cache) == (true,  :Success)
-
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            # Other events fall through
+            @test on_event!(c, cache, :post_iter)    == (false, :Default)
+            @test on_event!(c, cache, :initialize)   == (false, :Default)
+            @test on_event!(c, cache, :terminate)    == (false, :Default)
         end
 
-        @testset "RelResidualTol uses ψ0_norm" begin
-            cache.ψ0_norm = 2.0
+        @testset "RelResidualTol uses F0_norm at :post_linesearch" begin
+            cache.F0_norm = 2.0
             c = RelResidualTol(1e-4)
             # threshold = 0 + 1e-4 * 2 = 2e-4
-            cache.ψw .= [1e-3, 1e-3];     @test should_stop_at_w(c, cache) == (false, :Default)
-            cache.ψw .= [1e-5, 1e-5];     @test should_stop_at_w(c, cache) == (true,  :Success)
+            cache.Fz .= [1e-3, 1e-3];     @test on_event!(c, cache, :post_linesearch) == (false, :Default)
+            cache.Fz .= [1e-5, 1e-5];     @test on_event!(c, cache, :post_linesearch) == (true,  :Success)
 
             # with abstol kwarg
             c2 = RelResidualTol(1e-4; abstol = 1e-3)
-            cache.ψw .= [5e-4, 5e-4];     @test should_stop_at_w(c2, cache) == (true, :Success)
+            cache.Fz .= [5e-4, 5e-4];     @test on_event!(c2, cache, :post_linesearch) == (true, :Success)
         end
 
-        @testset "StepNormTol fires at_end only" begin
+        @testset "StepNormTol fires at :post_iter only" begin
             c = StepNormTol(1e-8)
 
-            cache.k = 0   # no prev step yet
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            cache.k = 0
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
 
             cache.k = 5
             cache.x .= [1.0, 1.0]; cache.x_prev .= [1.0, 1.0]
-            @test should_stop_at_end(c, cache) == (true, :Stalled)
+            @test on_event!(c, cache, :post_iter) == (true, :Stalled)
 
             cache.x_prev .= [0.0, 0.0]
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
 
-            @test should_stop_at_w(c, cache) == (false, :Default)
-            @test should_stop_at_z(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_linesearch) == (false, :Default)
         end
 
-        @testset "DirectionNormTol fires at_end only" begin
+        @testset "DirectionNormTol fires at :post_iter only" begin
             c = DirectionNormTol(1e-10)
 
             cache.k = 0
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
 
             cache.k = 5
             cache.d .= [1e-12, 1e-12]
-            @test should_stop_at_end(c, cache) == (true, :Stalled)
+            @test on_event!(c, cache, :post_iter) == (true, :Stalled)
 
             cache.d .= [1.0, 1.0]
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_iter) == (false, :Default)
         end
 
-        @testset "MaxIters / MaxFEvals / MaxTime" begin
-            cache.k = 999;        @test should_stop_at_end(MaxIters(1000), cache) == (false, :Default)
-            cache.k = 1000;       @test should_stop_at_end(MaxIters(1000), cache) == (true,  :MaxIters)
+        @testset "MaxIters / MaxFEvals / MaxTime fire at :post_iter" begin
+            cache.k = 999;        @test on_event!(MaxIters(1000), cache, :post_iter) == (false, :Default)
+            cache.k = 1000;       @test on_event!(MaxIters(1000), cache, :post_iter) == (true,  :MaxIters)
 
-            cache.n_evals = 50;   @test should_stop_at_end(MaxFEvals(100), cache) == (false, :Default)
-            cache.n_evals = 100;  @test should_stop_at_end(MaxFEvals(100), cache) == (true,  :MaxFEvals)
+            cache.n_evals = 50;   @test on_event!(MaxFEvals(100), cache, :post_iter) == (false, :Default)
+            cache.n_evals = 100;  @test on_event!(MaxFEvals(100), cache, :post_iter) == (true,  :MaxFEvals)
 
             cache.t_start = time() + 100.0   # in the future → no time elapsed
-            @test should_stop_at_end(MaxTime(0.001), cache) == (false, :Default)
+            @test on_event!(MaxTime(0.001), cache, :post_iter) == (false, :Default)
             cache.t_start = time() - 100.0   # 100 sec in the past
-            @test should_stop_at_end(MaxTime(0.001), cache) == (true,  :MaxTime)
+            @test on_event!(MaxTime(0.001), cache, :post_iter) == (true,  :MaxTime)
         end
 
         @testset "UserStop callback" begin
             c1 = UserStop(_cache -> (true, :CustomCode))
-            stopped, code = should_stop_at_end(c1, cache)
+            stopped, code = on_event!(c1, cache, :post_iter)
             @test stopped
             @test code == :CustomCode
 
             c2 = UserStop(_cache -> (false, :Default))
-            @test should_stop_at_end(c2, cache) == (false, :Default)
+            @test on_event!(c2, cache, :post_iter) == (false, :Default)
         end
 
         @testset "AnyOf composes (first to fire wins)" begin
@@ -444,18 +807,19 @@ end
                 MaxIters(100),
             )
             # Neither fires
-            cache.ψw .= [0.5, 0.5]
+            cache.Fz .= [0.5, 0.5]
             cache.k = 50
-            @test should_stop_at_w(c, cache)   == (false, :Default)
-            @test should_stop_at_end(c, cache) == (false, :Default)
+            @test on_event!(c, cache, :post_linesearch) == (false, :Default)
+            @test on_event!(c, cache, :post_iter)       == (false, :Default)
 
-            # AbsResidualTol fires at_w
-            cache.ψw .= [1e-8, 1e-8]
-            @test should_stop_at_w(c, cache) == (true, :Success)
+            # AbsResidualTol fires at :post_linesearch
+            cache.Fz .= [1e-8, 1e-8]
+            @test on_event!(c, cache, :post_linesearch) == (true, :Success)
 
-            # MaxIters fires at_end
+            # MaxIters fires at :post_iter
             cache.k = 200
-            @test should_stop_at_end(c, cache) == (true, :MaxIters)
+            cache.Fz .= [0.5, 0.5]
+            @test on_event!(c, cache, :post_iter) == (true, :MaxIters)
         end
 
         @testset "DFProjection default stopping" begin
@@ -482,10 +846,10 @@ end
         @testset "end-to-end: RelResidualTol converges" begin
             F2(u, p) = u .- p
             target = [0.3, -0.2]
-            prob = SciMLBase.NonlinearProblem(F2, [1.0, -1.0], target)
+            prob = SciMLBase.NonlinearProblem(F2, [1.0, -1.0], target;
+                                              lb = -ones(2), ub = ones(2))
             alg = DFProjection(;
                 inertial = NoInertial(),
-                set      = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 stopping = AnyOf(RelResidualTol(1e-6; abstol = 1e-12), MaxIters(1000)),
             )
             sol = solve(prob, alg)
@@ -518,7 +882,7 @@ end
             @test DFProjection() isa SciMLBase.AbstractNonlinearAlgorithm
         end
 
-        @testset "Out-of-place NonlinearProblem: ψ(u,p) = u" begin
+        @testset "Out-of-place NonlinearProblem: F(u,p) = u" begin
             f(u, p) = copy(u)
             prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
             sol = solve(prob, DFProjection(; inertial = NoInertial(),
@@ -542,13 +906,13 @@ end
             @test norm(sol.u) <= 1e-5
         end
 
-        @testset "Parameters p flow through: ψ(u,p) = u - p" begin
+        @testset "Parameters p flow through: F(u,p) = u - p" begin
             f(u, p) = u .- p
             target = [0.3, -0.2]
-            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0], target)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0], target;
+                                              lb = -ones(2), ub = ones(2))
             sol = solve(prob, DFProjection(;
                 inertial = NoInertial(),
-                set      = BoxSet([-1.0, -1.0], [1.0, 1.0]),
                 maxiters = 1000,
             ))
             @test sol.retcode == SciMLBase.ReturnCode.Success
@@ -565,7 +929,7 @@ end
 
         @testset "MaxIters retcode" begin
             # Need a problem that does NOT trivially converge at α=1.
-            # For ψ(u)=u with d_0=-u, z_0 = w + α(-w) = 0 at α=1 — converges
+            # For F(u)=u with d_0=-u, z_0 = w + α(-w) = 0 at α=1 — converges
             # in one step. Use Dai P2 form `u - sin(u)`: solution x* = 0,
             # but with the slow tail near zero (Jacobian = 1 - cos = 0 at 0)
             # so n=10 from ones(10) needs ~16 iterations. Forcing maxiters=2

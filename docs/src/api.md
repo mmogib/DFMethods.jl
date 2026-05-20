@@ -9,23 +9,36 @@ CurrentModule = DFMethods
 ```@index
 ```
 
+## Problem types
+
+```@docs
+ConstrainedNonlinearProblem
+```
+
+A standard `SciMLBase.NonlinearProblem` covers unconstrained problems and
+box-constrained problems (via `prob.lb` / `prob.ub`).
+[`ConstrainedNonlinearProblem`](@ref) wraps a `NonlinearProblem` together
+with an [`AbstractConstraintSet`](@ref) for arbitrary closed convex feasible
+sets.
+
 ## Algorithm types
 
 ```@docs
-AbstractDFProjectionAlgorithm
+AbstractDFProjection
 DFProjection
 DFProjectionCache
-DFSolution
 ```
 
 ## Solving
 
 ```@docs
-solve_df
-solve_df!
 init_cache
-step!
 ```
+
+The internal `DFMethods.step!(::DFProjectionCache)` advances one outer
+iteration on the inner cache and is used by `CommonSolve.step!` below.
+User-level driving goes through `solve(prob, alg)` or the `init` / `step!`
+/ `solve!` triplet documented under [SciML integration](#SciML-integration).
 
 ## SciML integration
 
@@ -34,14 +47,6 @@ DFMethods.DFSciMLCache
 CommonSolve.init(::SciMLBase.NonlinearProblem, ::DFProjection)
 CommonSolve.step!(::DFMethods.DFSciMLCache)
 CommonSolve.solve!(::DFMethods.DFSciMLCache)
-```
-
-## Assumption traits
-
-```@docs
-monotonicity_required
-pseudomonotonicity_sufficient
-convex_set_required
 ```
 
 ## Search directions
@@ -55,16 +60,25 @@ direction!
 ## Line searches
 
 ```@docs
-AbstractDFLineSearch
-LSI
-LSII
-LSIII
-LSIV
-LSV
-LSVI
-LSVII
-gamma_k
-linesearch!
+ConstantBacktrack
+ResidualNormBacktrack
+AdaptiveClampedBacktrack
+```
+
+Each is a subtype of `LineSearch.AbstractLineSearchAlgorithm` (from
+[`LineSearch.jl`](https://github.com/SciML/LineSearch.jl)) and implements
+the standard `CommonSolve.init` / `CommonSolve.solve!` contract. User-defined
+line searches obey the same contract.
+
+## Iterate-update strategies
+
+```@docs
+AbstractIterateUpdate
+SolodovSvaiterProjection
+DirectUpdate
+HalpernUpdate
+update_iterate!
+DFMethods.init_state
 ```
 
 ## Inertial rules
@@ -75,6 +89,16 @@ Inertial
 NoInertial
 inertial_coef
 apply_inertial!
+```
+
+## Callbacks
+
+```@docs
+AbstractCallback
+on_event!
+HistoryCallback
+LoggingCallback
+HISTORY_FIELDS
 ```
 
 ## Stopping criteria
@@ -90,9 +114,6 @@ MaxTime
 MaxFEvals
 UserStop
 AnyOf
-should_stop_at_w
-should_stop_at_z
-should_stop_at_end
 ```
 
 ## Constraint sets and projections

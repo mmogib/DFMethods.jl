@@ -1,16 +1,19 @@
 name = "DFMethods"
 uuid = "5fd0b45f-fdf3-4567-a8b1-5e033765ff5d"
 authors = ["Mohammed Alshahrani <mshahrani@kfupm.edu.sa>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
+LineSearch = "87fe0de2-c867-4266-b59a-2f0a94fc965b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 
 [compat]
 CommonSolve = "0.2"
-SciMLBase = "2"
+LineSearch = "0.1"
+SciMLBase = "2.53"
 julia = "1.10"
 
 [extras]

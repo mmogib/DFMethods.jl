@@ -9,24 +9,26 @@
 
 Solve
 
-$$\text{Find } u^* \in X \subset \mathbb{R}^n \text{ such that } \psi(u^*) = 0,$$
+$$\text{Find } u^* \in X \subset \mathbb{R}^n \text{ such that } F(u^*) = 0,$$
 
-where $X$ is closed convex and $\psi$ is continuous and (pseudo-)monotone. **No derivatives required.**
+where $X$ is closed convex and $F$ is continuous and (pseudo-)monotone. **No derivatives required.**
 
 ## Status
 
-v0.1.0 — first registered release. Public API stable. Documentation and full benchmark suite in progress.
+A generic derivative-free projection framework with pluggable search direction, line search, iterate-update strategy, inertial rule, constraint set, and callbacks. The algorithm itself is problem-agnostic; the feasible set is a property of the problem, not the algorithm. See [`CHANGELOG.md`](CHANGELOG.md) for the per-version capability surface.
 
 ## Where it sits in the Julia ecosystem
 
-| | Constrained? | Derivative-free? | CG / projection-based? |
+| | Constrained? | Derivative-free? | Approach |
 |---|---|---|---|
-| NonlinearSolve.jl (`SimpleDFSane`) | ✗ | ✓ | ✗ (spectral residual) |
-| NLboxsolve.jl | box only | ✗ | ✗ |
-| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | ✗ (minimization, not $\psi(x)=0$) |
-| **DFMethods.jl** | **general convex** | **✓** | **✓ (Solodov–Svaiter)** |
+| NonlinearSolve.jl `DFSane` / `SimpleDFSane` | ✗ | ✓ | spectral residual |
+| NonlinearSolve.jl `Broyden` / `Klement` / `LimitedMemoryBroyden` | ✗ (incl. box for some) | ✓ (secant) | quasi-Newton |
+| NonlinearSolve.jl JFNK (Newton + Krylov) | ✗ | ✓ (matrix-free) | Newton–Krylov |
+| NLboxsolve.jl | box only | ✗ | Newton/QN |
+| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | minimization |
+| **DFMethods.jl** | **any closed convex (incl. ℝⁿ)** | **✓** | **projection-based** |
 
-First Julia implementation of the Solodov–Svaiter hyperplane-projection family with derivative-free CG-style search directions and pluggable line search / inertia / constraint set.
+DFMethods.jl complements the SciML-native derivative-free options (spectral-residual DF-SANE, quasi-Newton secant methods, matrix-free Newton–Krylov) — all of which target the unconstrained case — by extending the problem class to **any closed convex feasibility set** under a (pseudo-)monotone $F$, with the unconstrained case recovered as $X = \mathbb{R}^n$ (where $P_X = \mathrm{id}$). The framework offers derivative-free CG-style search directions, three pluggable iterate-update strategies (Solodov–Svaiter hyperplane projection, direct projection, Halpern anchoring), and pluggable line search / inertia / constraint set / callbacks.
 
 ## Install
 
@@ -55,58 +57,64 @@ Pkg.add(url = "https://github.com/mmogib/DFMethods.jl")
 ```julia
 using NonlinearSolve, DFMethods
 
-# ψ : R^n → R^n  (out-of-place; in-place f!(du, u, p) also supported)
+# F : R^n → R^n  (out-of-place; in-place f!(du, u, p) also supported)
 F(u, p) = u .- p
 
-# NonlinearProblem with target p = [0.3, -0.2]
+# Unconstrained
 prob = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2])
-
-# Constrained to the box [-1, 1]²
-alg = DFProjection(; set = BoxSet([-1.0, -1.0], [1.0, 1.0]))
-
-sol = solve(prob, alg)
+sol  = solve(prob, DFProjection())
 sol.u             # ≈ [0.3, -0.2]
 sol.retcode       # ReturnCode.Success
-sol.stats.nf      # number of ψ evaluations
+sol.stats.nf      # number of F evaluations
 sol.stats.nsteps  # outer iterations
 ```
 
-See `examples/extending.jl` for how to define your own search direction and line search.
+Box constraints flow through SciML's standard `lb` / `ub` kwargs:
+
+```julia
+prob_box = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2];
+                            lb = [-1.0, -1.0], ub = [1.0, 1.0])
+sol_box  = solve(prob_box, DFProjection())
+```
+
+For arbitrary closed convex sets, wrap with `ConstrainedNonlinearProblem`:
+
+```julia
+inner = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2])
+prob_hs = ConstrainedNonlinearProblem(inner, HalfSpace([1.0, 1.0], 0.5))
+sol_hs  = solve(prob_hs, DFProjection())
+```
+
+The same `DFProjection()` instance solves all three problems — the constraint set lives on the problem.
+
+See the [Quickstart](https://mmogib.github.io/DFMethods.jl/stable/quickstart/) and [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) pages of the docs for callbacks, custom directions / line searches, and lower-level access.
 
 ## Algorithm
 
-Implements **UIDFPAF** — the *Unified Inertial Derivative-Free Projection Algorithmic Framework* from
+A configurable framework for derivative-free projection methods. One outer iteration:
 
-> Ibrahim, A. H., Alshahrani, M., & Al-Homidan, S. (2026). *A Unified Derivative-Free Projection Framework for Convex-Constrained Nonlinear Equations.* Journal of Optimization Theory and Applications, **208**:11. <https://doi.org/10.1007/s10957-025-02826-x>
+> inertial extrapolation → derivative-free search direction → backtracking line search → trial point → iterate update (Solodov–Svaiter hyperplane projection, direct projection, or Halpern anchoring).
 
-One outer iteration: inertial extrapolation → derivative-free direction → backtracking line search → trial-point check → hyperplane projection → approximate projection onto $X \cap H_k$.
+The mathematical components — Solodov–Svaiter hyperplane projection, Halpern anchoring, spectral-residual derivative-free directions, inertial extrapolation for monotone operators — draw on a body of literature spanning several decades. See the [References](https://mmogib.github.io/DFMethods.jl/stable/references/) page of the docs for the lineage of each component.
 
 ## Pluggable components
 
 | Component | Abstract type | Built-in instances |
 |---|---|---|
 | Search direction | `AbstractSearchDirection` | `SpectralThreeTerm` |
-| Line search | `AbstractDFLineSearch` | `LSI`, `LSII`, `LSIII`, `LSIV`, `LSV`, `LSVI`, `LSVII` |
+| Line search | `LineSearch.AbstractLineSearchAlgorithm` | `ConstantBacktrack`, `ResidualNormBacktrack`, `AdaptiveClampedBacktrack` |
+| Iterate update | `AbstractIterateUpdate` | `SolodovSvaiterProjection`, `DirectUpdate`, `HalpernUpdate` |
 | Inertial rule | `AbstractInertialRule` | `Inertial(θ)`, `NoInertial` |
-| Constraint set | `AbstractConstraintSet` | `RealSpace`, `BoxSet`, `HalfSpace`, `Intersection`, `CappedBox`, `UserSet` |
+| Constraint set (on the problem) | `AbstractConstraintSet` | `RealSpace`, `BoxSet`, `HalfSpace`, `Intersection`, `CappedBox`, `UserSet` |
+| Stopping / observers | `AbstractCallback` | `AbsResidualTol`, `RelResidualTol`, `MaxIters`, `MaxTime`, `MaxFEvals`, `HistoryCallback`, `LoggingCallback`, … |
 
-Each is a small struct with one required method; see the *Extending* page of the docs.
+Each is a small struct with one required method; see the [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) page of the docs.
 
 ## Citation
 
-If you use DFMethods.jl in research, please cite:
+If you use DFMethods.jl in research, please cite **the software**. A formal software-citation entry (`@software{...}` with a Zenodo DOI) will accompany the first tagged release; until then, please cite the package by name, version, and the GitHub URL `https://github.com/mmogib/DFMethods.jl`.
 
-```bibtex
-@article{ibrahim_unified_2026,
-  title   = {A Unified Derivative-Free Projection Framework for Convex-Constrained Nonlinear Equations},
-  author  = {Ibrahim, Abdulkarim Hassan and Alshahrani, Mohammed and Al-Homidan, Suliman},
-  journal = {Journal of Optimization Theory and Applications},
-  volume  = {208},
-  number  = {11},
-  year    = {2026},
-  doi     = {10.1007/s10957-025-02826-x},
-}
-```
+The package implements components drawn from a body of theoretical literature. If you build on a specific component or rely on a specific convergence result, please additionally cite the originating source; see the [References](https://mmogib.github.io/DFMethods.jl/stable/references/) page of the docs.
 
 ## License
 

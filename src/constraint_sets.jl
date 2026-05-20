@@ -36,6 +36,14 @@ function project! end
 The whole of ``\\mathbb{R}^n`` — projection is the identity. Use to
 disable constraints (e.g., for unconstrained benchmarking against
 NonlinearSolve.jl's `SimpleDFSane`).
+
+```jldoctest
+julia> project([1.0, -2.0, 3.0], RealSpace())
+3-element Vector{Float64}:
+  1.0
+ -2.0
+  3.0
+```
 """
 struct RealSpace <: AbstractConstraintSet end
 
@@ -51,6 +59,14 @@ project!(y::AbstractVector, x::AbstractVector, ::RealSpace) = (y .= x; return y)
 Box constraint ``\\{x : \\text{lower}_i \\le x_i \\le \\text{upper}_i\\}``.
 `lower` and `upper` are vectors of equal length with `lower[i] ≤ upper[i]`
 element-wise. Use `BoxSet(fill(a, n), fill(b, n))` for uniform scalar bounds.
+
+```jldoctest
+julia> project([2.0, -3.0, 0.5], BoxSet([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]))
+3-element Vector{Float64}:
+  1.0
+ -1.0
+  0.5
+```
 """
 struct BoxSet{T<:AbstractFloat} <: AbstractConstraintSet
     lower::Vector{T}
@@ -126,8 +142,8 @@ end
 
 Intersection of two closed convex sets. Projection uses Dykstra's
 algorithm (alternating projection with two correction sequences). For
-``\\text{Box} \\cap \\text{HalfSpace}`` (the paper's polyhedral
-``\\Omega``), Dykstra converges geometrically.
+``\\text{Box} \\cap \\text{HalfSpace}`` (the polyhedral set
+``\\Omega`` realized by [`CappedBox`](@ref)), Dykstra converges geometrically.
 
 For workloads that need general polyhedral projection, a direct QP
 solver (JuMP + HiGHS) will be added in Phase 2 as an alternative backend.
@@ -174,16 +190,17 @@ function project!(y::AbstractVector, x::AbstractVector, set::Intersection)
 end
 
 # ============================================================================
-# CappedBox: Ω(a, b, c) = [a, b]^n ∩ {x : Σ x_i ≤ c}  (Ibrahim 2026 eq. 33)
+# CappedBox: Ω(a, b, c) = [a, b]^n ∩ {x : Σ x_i ≤ c}
 # ============================================================================
 
 """
     CappedBox(a, b, c)
 
 The polyhedral set ``\\Omega(a, b, c) = \\{x \\in \\mathbb{R}^n : a \\le x_i \\le b,\\ \\sum_i x_i \\le c\\}``
-used in Ibrahim 2026 for the numerical experiments (eq. 33). `a, b, c`
-are scalars; the dimension `n` is inferred from the input vector at
-projection time.
+— a uniform-bound box intersected with a single budget-style halfspace.
+`a, b, c` are scalars; the dimension `n` is inferred from the input
+vector at projection time. This set is a common experimental domain in
+the convex-constrained nonlinear-equations literature.
 
 # Projection
 Closed-form via bisection on a 1D Lagrange multiplier:

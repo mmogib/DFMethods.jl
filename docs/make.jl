@@ -9,6 +9,10 @@ makedocs(;
     modules=[DFMethods],
     authors="Mohammed Alshahrani <mshahrani@kfupm.edu.sa>",
     sitename="DFMethods.jl",
+    # Only exported names need to appear in @docs blocks. Internal helpers
+    # (init_state, SolodovSvaiterState, HalpernState, _constraint_set, …)
+    # may carry docstrings without being included in the manual.
+    checkdocs=:exports,
     format=Documenter.HTML(;
         canonical="https://mmogib.github.io/DFMethods.jl",
         edit_link="main",
@@ -20,7 +24,10 @@ makedocs(;
         "Algorithm"       => "algorithm.md",
         "Constraint Sets" => "constraints.md",
         "Extending"       => "extending.md",
+        "Benchmarks"      => "benchmarks.md",
+        "Comparisons"     => "comparisons.md",
         "API Reference"   => "api.md",
+        "References"      => "references.md",
     ],
 )
 

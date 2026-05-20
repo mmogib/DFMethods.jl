@@ -1,15 +1,20 @@
 # projection.jl — Approximate projection onto X ∩ H_k.
 #
-# The paper's projection step (eq. 5) projects the target
-#     t = w_k - λ_k ψ(z_k)
+# The Solodov–Svaiter projection step projects the target
+#     t = w_k - λ_k F(z_k)
 # onto X ∩ H_k where
-#     H_k = {x : ψ(z_k)' (x - z_k) ≤ 0}
-# to tolerance ε_k = (ζ²/2) ‖λ_k ψ(z_k)‖².
+#     H_k = {x : F(z_k)' (x - z_k) ≤ 0}
+# to tolerance ε_k = (ζ²/2) ‖λ_k F(z_k)‖².
 #
 # We use Dykstra's algorithm over the two sets (X, H_k) with an ε-style
 # stopping criterion `‖y_new - y_prev‖² ≤ ε`. To avoid allocating a
 # HalfSpace struct each outer iteration, we accept the hyperplane
 # normal `a` and offset `c` directly and inline the halfspace projection.
+
+# Note: `SolodovSvaiterState` moved to `iterate_updates.jl` in Stage 4 —
+# it's the per-solve state for the SolodovSvaiterProjection strategy, not
+# a generic projection-step concern. `approx_project_X_halfspace!` below
+# remains as a shared helper that the strategy calls.
 
 """
     approx_project_X_halfspace!(out, target, X, a, c, ε,

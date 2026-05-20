@@ -2,23 +2,27 @@ module DFMethods
 
 using LinearAlgebra
 using SciMLBase
+using CommonSolve
+using LineSearch
 
 # ── Includes (dependency order) ──────────────────────────────────────────────
-include("types.jl")                       # AbstractDFProjectionAlgorithm + traits
+include("types.jl")                       # AbstractDFProjection, ConstrainedNonlinearProblem, init_state, AbstractCallback contracts
 include("constraint_sets.jl")             # Sets + exact projections
 include("inertial.jl")                    # Inertial extrapolation rules
 include("search_directions.jl")           # AbstractSearchDirection + SpectralThreeTerm
-include("line_searches.jl")               # AbstractDFLineSearch + LSI..LSVII
+include("line_searches.jl")               # ConstantBacktrack, ResidualNormBacktrack, AdaptiveClampedBacktrack (LineSearch.jl-aligned)
 include("projection.jl")                  # Approximate projection onto X ∩ H_k
-include("stopping_criteria.jl")           # AbstractStoppingCriterion + variants
-include("algorithm.jl")                   # DFProjection + cache + step! + solve_df
-include("nonlinearsolve_integration.jl")  # SciMLBase.__solve dispatch
+include("iterate_updates.jl")             # AbstractIterateUpdate + Solodov–Svaiter / Direct / Halpern
+include("stopping_criteria.jl")           # AbstractStoppingCriterion + 9 criteria, on_event!-dispatched
+include("callbacks.jl")                   # HistoryCallback, LoggingCallback, HISTORY_FIELDS
+include("algorithm.jl")                   # DFProjection + cache + step!
+include("nonlinearsolve_integration.jl")  # CommonSolve.init/solve! + SciMLBase.__solve dispatch
 
 # ── Exports ──────────────────────────────────────────────────────────────────
 export
     # types.jl
-    AbstractDFProjectionAlgorithm,
-    monotonicity_required, pseudomonotonicity_sufficient, convex_set_required,
+    AbstractDFProjection,
+    ConstrainedNonlinearProblem,
 
     # constraint_sets.jl
     AbstractConstraintSet,
@@ -28,16 +32,24 @@ export
     # inertial.jl
     AbstractInertialRule,
     NoInertial, Inertial,
+    inertial_coef, apply_inertial!,
 
     # search_directions.jl
     AbstractSearchDirection,
     SpectralThreeTerm,
     direction!,
 
-    # line_searches.jl
-    AbstractDFLineSearch,
-    LSI, LSII, LSIII, LSIV, LSV, LSVI, LSVII,
-    gamma_k,
+    # line_searches.jl (LineSearch.jl-aligned)
+    ConstantBacktrack, ResidualNormBacktrack, AdaptiveClampedBacktrack,
+
+    # iterate_updates.jl
+    AbstractIterateUpdate,
+    SolodovSvaiterProjection, DirectUpdate, HalpernUpdate,
+    update_iterate!,
+
+    # types.jl (callback API)
+    AbstractCallback,
+    on_event!,
 
     # stopping_criteria.jl
     AbstractStoppingCriterion,
@@ -45,10 +57,12 @@ export
     StepNormTol, DirectionNormTol,
     MaxIters, MaxTime, MaxFEvals,
     UserStop, AnyOf,
-    should_stop_at_w, should_stop_at_z, should_stop_at_end,
+
+    # callbacks.jl
+    HistoryCallback, LoggingCallback, HISTORY_FIELDS,
 
     # algorithm.jl
-    DFProjection, DFProjectionCache, DFSolution,
-    init_cache, solve_df, solve_df!
+    DFProjection, DFProjectionCache,
+    init_cache
 
 end # module DFMethods
