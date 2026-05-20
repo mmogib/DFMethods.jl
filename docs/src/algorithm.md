@@ -8,8 +8,8 @@ DFMethods solves systems of nonlinear equations with a closed convex
 feasibility set, using a *derivative-free projection* family of methods.
 Each outer iteration is composed of seven steps. Different choices for
 each step produce different concrete algorithms; the package ships a
-default that has been validated empirically (see [Benchmarks](@ref)) and
-exposes every step as a pluggable component (see [Extending](@ref)).
+default and exposes every step as a pluggable component
+(see [Extending](@ref)).
 
 ## Problem class
 
@@ -130,9 +130,6 @@ DFProjection(;
 )
 ```
 
-The defaults are the empirical winners from the benchmark sweep — see
-[Benchmarks](@ref) for the data.
-
 ## Convergence
 
 A representative convergence theorem holds under the following
@@ -149,11 +146,11 @@ assumptions:
 
 Under these assumptions the iterates produced by `step!` converge to a
 solution of $F(u) = 0$ in $X$. A representative unified convergence
-result covering this family of configurations is given in [Ibrahim,
-Alshahrani, Al-Homidan 2026, Thm 3.1] — see [References](@ref);
-component-specific convergence results (Solodov–Svaiter projection,
-spectral-CG directions, Halpern anchoring, etc.) appear in the
-respective originating works.
+result covering this family of configurations is given in
+[Ibrahim, Alshahrani, Al-Homidan 2026](https://doi.org/10.1007/s10957-025-02826-x),
+Theorem 3.1; component-specific convergence results (Solodov–Svaiter
+projection, spectral-CG directions, Halpern anchoring, etc.) appear in
+the respective originating works.
 
 The library does not enforce these assumptions at runtime. Iteration
 proceeds regardless of whether they are satisfied. Users supplying custom

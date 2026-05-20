@@ -34,7 +34,7 @@ function project! end
     RealSpace()
 
 The whole of ``\\mathbb{R}^n`` — projection is the identity. Use to
-disable constraints (e.g., for unconstrained benchmarking against
+disable constraints (e.g., for unconstrained comparison with
 NonlinearSolve.jl's `SimpleDFSane`).
 
 ```jldoctest

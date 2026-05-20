@@ -135,9 +135,3 @@ The shaded leaves are the niche DFMethods.jl was designed for: convex
 feasibility, no derivatives, equation form. For everything else, the
 ecosystem already has well-maintained alternatives.
 
-## Further reading
-
-For algorithm-internal context — the seven steps of one outer iteration,
-the convergence theorem, and the pluggable components — see
-[Algorithm](@ref). For empirical context — convergence rates and
-F-evaluation counts on a 3 000-run sweep — see [Benchmarks](@ref).
