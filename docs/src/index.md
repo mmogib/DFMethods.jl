@@ -59,8 +59,8 @@ discussion of related packages.
 
 ```@contents
 Pages = ["quickstart.md", "algorithm.md", "constraints.md",
-         "extending.md", "benchmarks.md", "comparisons.md",
-         "api.md", "references.md"]
+         "extending.md", "comparisons.md",
+         "api.md"]
 Depth = 1
 ```
 
@@ -95,4 +95,4 @@ ub)`); other convex sets use [`ConstrainedNonlinearProblem`](@ref). See
 The package's components draw on a body of literature on Solodov–Svaiter-
 style projection methods, derivative-free spectral-residual methods, the
 Halpern anchoring iteration, and inertial extrapolation for monotone
-operators. See [References](@ref) for the full lineage.
+operators. Each component's docstring cites its originating source.

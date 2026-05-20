@@ -34,8 +34,7 @@ end
 """
     ResidualNormBacktrack(; σ=0.01, ρ=0.6, maxbt=50)
 
-Backtracking with `γ_k = ‖F(z_k)‖`. Default line search for `DFProjection()`
-(empirical winner from the s30 benchmark for the SpectralThreeTerm direction).
+Backtracking with `γ_k = ‖F(z_k)‖`. Default line search for `DFProjection()`.
 """
 Base.@kwdef struct ResidualNormBacktrack <: LineSearch.AbstractLineSearchAlgorithm
     σ::Float64     = 0.01

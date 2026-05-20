@@ -24,10 +24,8 @@ makedocs(;
         "Algorithm"       => "algorithm.md",
         "Constraint Sets" => "constraints.md",
         "Extending"       => "extending.md",
-        "Benchmarks"      => "benchmarks.md",
         "Comparisons"     => "comparisons.md",
         "API Reference"   => "api.md",
-        "References"      => "references.md",
     ],
 )
 

@@ -5,6 +5,83 @@ All notable changes to **DFMethods.jl** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-05-20
+
+Documentation hygiene and extension-contract normalization. Removes
+harness-vocabulary references that had leaked from the project's
+standalone `benchmarks/` directory into the library docs and source-file
+docstrings (`s30_benchmark.jl`, `benchmarks/scripts/...`,
+`experiments.db`); drops the standalone `Benchmarks` and `References`
+documentation pages (component citations are now inline DOI links at
+the point of use); adds a canonical *Extension contracts* reference
+section to `extending.md` documenting `ctx`, `cache`, and per-solve
+`state`; reorganises `examples/` into five small focused files, one per
+extension contract. No source-code behavior change; all 223 tests pass.
+
+### Added
+- `docs/src/extending.md` §0 *Extension contracts: ctx, cache, and
+  per-solve state* — canonical reference for the three context-passing
+  conventions used by the seven extension points. Documents the
+  `direction!` ctx (7 fields) and `update_iterate!` ctx (11 fields) as
+  distinct NamedTuples, the `cache` lifecycle events, the `init_state`
+  pattern, and the mutation policy. Resolves the field-list
+  inconsistency between §2 and §3 in the v0.2.0 docs.
+- `docs/src/extending.md` §1, §3, §4, §5 — each gained an inline
+  custom-subtype "essence" snippet (struct + key contract method)
+  cross-referencing the corresponding runnable file in `examples/`.
+- Four new example files in `examples/`:
+  - `nonmonotone_armijo.jl` (§1): line-search cache holding a residual-
+    norm window across `solve!` calls (Grippo-Lampariello-Lucidi 1986
+    lineage).
+  - `mann_iteration.jl` (§3): canonical `init_state` + `ctx.state`
+    demonstration (Mann 1953).
+  - `mainge_inertia.jl` (§4): Nesterov-style schedule
+    ``θ_k = (k-1)/(k+α)`` (Maingé 2008 lineage).
+  - `l1_ball.jl` (§5): non-trivial projection via the Duchi et al. 2008
+    sorted-soft-threshold algorithm.
+
+### Renamed
+- `examples/extending.jl` → `examples/mprpl_direction.jl`. The file's
+  remit narrows to the §2 search-direction example (MPRPL, Dai-Chen-Wen
+  2015); the `LSPower` line-search example previously bundled in is
+  superseded by `examples/nonmonotone_armijo.jl`.
+
+### Removed
+- `docs/src/benchmarks.md` and its entry in `docs/make.jl`. Benchmark
+  data and reproducer instructions belong with the standalone
+  `benchmarks/` harness, not the library docs.
+- `docs/src/references.md` and its entry in `docs/make.jl`. Component
+  citations are now inline at the point of use as `[Author Year](DOI)`
+  links; the `HalpernUpdate` docstring carries the Halpern 1967 citation
+  directly.
+
+### Changed
+- `docs/src/algorithm.md`: dropped two `[Benchmarks](@ref)` cross-refs;
+  the convergence-result reference now uses an inline DOI link.
+- `docs/src/comparisons.md`: "Further reading" section removed (cross-
+  linked the deleted Benchmarks page).
+- `docs/src/extending.md`: §1, §3 prose rewritten to reference §0 for
+  the contract surface and to point at the new example files; §2's
+  cross-reference updated for the file rename; six
+  `benchmarks/scripts/s05*.jl` / `s06*.jl` path references replaced
+  with inline DOI citations or removed.
+- `docs/src/index.md`: removed `benchmarks.md` and `references.md` from
+  the `@contents` Pages list; "Theoretical lineage" pointer updated to
+  send readers to component docstrings.
+- `src/line_searches.jl`: stripped the "(empirical winner from the s30
+  benchmark…)" parenthetical from the `ResidualNormBacktrack` docstring.
+- `src/constraint_sets.jl`: "unconstrained benchmarking against" →
+  "unconstrained comparison with" in the `RealSpace` docstring.
+- `src/iterate_updates.jl`: added a `# Reference` block to the
+  `HalpernUpdate` docstring carrying the Halpern 1967 DOI.
+
+### Known limitations (documented in §0)
+- Custom search-direction rules can declare per-solve `state` via
+  `init_state`, but the state is currently *not surfaced* through
+  `direction!`'s ctx. Workaround: hold scratch on the rule struct via
+  `Ref`/`Vector`. Routing `direction_state` through `ctx.state` is on
+  the roadmap for a future minor release.
+
 ## [0.2.0] — 2026-05-20
 
 Major restructuring toward **v0.2.0**. The release reorganizes `DFProjection`
@@ -82,5 +159,6 @@ for constrained nonlinear equations $F(x) = 0$ on a closed convex set $X$.
 - `SciMLBase` v2.x
 - `CommonSolve` v0.2.x
 
+[0.2.1]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.1.0

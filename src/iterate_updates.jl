@@ -137,6 +137,12 @@ The parameter `β` is either a scalar (constant across iterations) or a
 callable `β(k) -> Float64` (per-iteration schedule, e.g.
 `k -> 1 / (k + 2)` for the classical schedule with strong convergence
 to the nearest fixed point).
+
+# Reference
+
+Halpern, B. (1967). *Fixed Points of Nonexpanding Maps.* Bulletin of the
+AMS **73**(6): 957–961.
+[doi:10.1090/S0002-9904-1967-11864-0](https://doi.org/10.1090/S0002-9904-1967-11864-0).
 """
 struct HalpernUpdate{B} <: AbstractIterateUpdate
     β::B
