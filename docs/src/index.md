@@ -64,6 +64,28 @@ Pages = ["quickstart.md", "algorithm.md", "constraints.md",
 Depth = 1
 ```
 
+## Installation
+
+From the Julia General registry:
+
+```julia
+using Pkg
+Pkg.add("DFMethods")
+```
+
+Or, equivalently, from the REPL's Pkg mode:
+
+```
+] add DFMethods
+```
+
+To track unreleased changes directly from GitHub:
+
+```julia
+using Pkg
+Pkg.add(url = "https://github.com/mmogib/DFMethods.jl")
+```
+
 ## Public API in one example
 
 ```@setup index

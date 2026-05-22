@@ -38,12 +38,13 @@ function approx_project_X_halfspace!(out::AbstractVector,
                                      scratch::AbstractVector,
                                      out_prev::AbstractVector;
                                      maxiter::Int = 500)
-    fill!(p_buf, 0.0)
-    fill!(q_buf, 0.0)
+    T = eltype(out)
+    fill!(p_buf, zero(T))
+    fill!(q_buf, zero(T))
     copyto!(out, target)
 
     # Cache ‖a‖² for the inline halfspace projection
-    a_norm_sq = 0.0
+    a_norm_sq = zero(T)
     @inbounds for i in eachindex(a)
         a_norm_sq += a[i] * a[i]
     end
@@ -59,7 +60,7 @@ function approx_project_X_halfspace!(out::AbstractVector,
 
         # ── Project onto H = {x : a' x ≤ c} (with Dykstra correction q_buf) ─
         @. scratch = out + q_buf
-        s = 0.0
+        s = zero(T)
         for i in eachindex(scratch)
             s += a[i] * scratch[i]
         end
@@ -74,7 +75,7 @@ function approx_project_X_halfspace!(out::AbstractVector,
         @. q_buf = scratch - out
 
         # ── Convergence: ‖out - out_prev‖² ≤ ε ──────────────────────────
-        diff_sq = 0.0
+        diff_sq = zero(T)
         for i in eachindex(out)
             diff_sq += abs2(out[i] - out_prev[i])
         end
@@ -99,8 +100,9 @@ function approx_project_X_halfspace!(out::AbstractVector,
                                      out_prev::AbstractVector;
                                      maxiter::Int = 500)
     # Exact projection onto halfspace only.
-    a_norm_sq = 0.0
-    s = 0.0
+    T = eltype(out)
+    a_norm_sq = zero(T)
+    s = zero(T)
     @inbounds for i in eachindex(a)
         a_norm_sq += a[i] * a[i]
         s += a[i] * target[i]

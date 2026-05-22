@@ -42,34 +42,40 @@ NamedTuple, while `cache` is the live mutable [`DFProjectionCache`](@ref).
 Plain-argument contracts (§4, §5) get only what they need and no
 ambient state. Line search (§1) is its own pattern entirely.
 
-### `direction!` ctx — 7 fields
+### `direction!` ctx — 8 fields
 
 Constructed by the framework once per iteration, **before** the line
-search. A `NamedTuple` with:
+search. The vector fields are aliases into [`DFProjectionCache`](@ref)
+buffers, which are `Vector{T}` parametric on `T = eltype(x0) <:
+AbstractFloat` (with `Float64` fallback if `eltype(x0)` is not floating).
+A `NamedTuple` with:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `Fw`      | `Vector{Float64}` | ``F(w_k)`` |
-| `Fw_prev` | `Vector{Float64}` | ``F(w_{k-1})`` |
-| `w`       | `Vector{Float64}` | inertial point ``w_k = x_k + θ_k(x_k - x_{k-1})`` |
-| `w_prev`  | `Vector{Float64}` | previous inertial point ``w_{k-1}`` |
-| `d_prev`  | `Vector{Float64}` | previous direction ``d_{k-1}`` |
-| `k`       | `Int`             | iteration index (0-based) |
-| `α_prev`  | `Float64`         | previous line-search step ``α_{k-1}``; `1.0` at `k = 0` |
+| `Fw`              | `Vector{T}`   | ``F(w_k)`` |
+| `Fw_prev`         | `Vector{T}`   | ``F(w_{k-1})`` |
+| `w`               | `Vector{T}`   | inertial point ``w_k = x_k + θ_k(x_k - x_{k-1})`` |
+| `w_prev`          | `Vector{T}`   | previous inertial point ``w_{k-1}`` |
+| `d_prev`          | `Vector{T}`   | previous direction ``d_{k-1}`` |
+| `k`               | `Int`         | iteration index (0-based) |
+| `α_prev`          | `T`           | previous line-search step ``α_{k-1}``; `one(T)` at `k = 0` |
+| `direction_state` | rule-specific | per-solve state from `init_state(::AbstractSearchDirection, ...)`; `nothing` if undeclared |
 
 ### `update_iterate!` ctx — 11 fields
 
-Constructed once per iteration, **after** the line search has returned. A
-`NamedTuple` with:
+Constructed once per iteration, **after** the line search has returned.
+The vector fields alias into [`DFProjectionCache`](@ref) buffers,
+parametric on `T` as documented for `direction!` above. A `NamedTuple`
+with:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `w`             | `Vector{Float64}`         | inertial point |
-| `d`             | `Vector{Float64}`         | search direction (just computed by `direction!`) |
-| `α`             | `Float64`                 | current line-search step size |
-| `z`             | `Vector{Float64}`         | trial point ``z_k = w + α·d`` |
-| `Fw`            | `Vector{Float64}`         | ``F(w)`` |
-| `Fz`            | `Vector{Float64}`         | ``F(z)`` |
+| `w`             | `Vector{T}`               | inertial point |
+| `d`             | `Vector{T}`               | search direction (just computed by `direction!`) |
+| `α`             | `T`                       | current line-search step size |
+| `z`             | `Vector{T}`               | trial point ``z_k = w + α·d`` |
+| `Fw`            | `Vector{T}`               | ``F(w)`` |
+| `Fz`            | `Vector{T}`               | ``F(z)`` |
 | `set`           | `AbstractConstraintSet`   | resolved feasibility set |
 | `k`             | `Int`                     | iteration index |
 | `ζ`             | `Float64`                 | the algorithm's ``ζ`` parameter (used by Solodov–Svaiter projection) |
@@ -136,18 +142,18 @@ held on `DFProjectionCache` in the slot matching the component's role:
 `cache.direction_state`, `cache.iterate_update_state`, or
 `cache.stopping_state`. Surfacing depends on the contract:
 
-- **Iterate update** (§3): always available as `ctx.state` in
+- **Search direction** (§2): available as `ctx.direction_state` in
+  `direction!`.
+- **Iterate update** (§3): available as `ctx.state` in
   `update_iterate!`. See the Mann iteration example.
 - **Stopping criteria, callbacks** (§6, §7): not surfaced through
   `on_event!`. Persistent state should be held on the rule struct
   itself (mutable struct with `Ref`/`Vector` fields).
-- **Search direction** (§2): ⚠ **not currently surfaced** through
-  `ctx`. The `init_state` call still allocates `cache.direction_state`,
-  but `direction!`'s ctx does not include a `state` field as of v0.2.
-  Custom directions needing scratch buffers should hold them on the
-  rule struct (mutable, with `Ref`/`Vector` fields). Routing
-  `direction_state` through `ctx.state` is on the roadmap for a future
-  minor release.
+
+The field name differs between the two surfaced contracts for historical
+reasons: `direction!`'s ctx uses the prefixed `direction_state` (added in
+v0.3.0), while `update_iterate!`'s ctx keeps the unprefixed `state` from
+the original v0.2.0 surface.
 
 ### Mutation policy
 
@@ -158,6 +164,9 @@ held on `DFProjectionCache` in the slot matching the component's role:
   `w` for `apply_inertial!`.
 - New NamedTuple fields may be added to `ctx` in future releases without
   breaking custom rules (rules ignore fields they don't read).
+- Inside a custom rule, `keys(ctx)` returns the live field tuple. The
+  schemas above are also pinned in `test/runtests.jl` so this
+  documentation and the implementation cannot drift apart silently.
 
 ## 1. Line search
 
@@ -205,18 +214,19 @@ residual-norm window of a non-monotone Armijo rule:
 
 ```julia
 Base.@kwdef struct NonmonotoneArmijo <: LineSearch.AbstractLineSearchAlgorithm
-    σ::Float64 = 1e-4
+    σ::Float64 = 1e-4   # stays Float64 (algorithm hyperparam, Approach A)
     ρ::Float64 = 0.6
     memory::Int = 5
     maxbt::Int = 50
 end
 
-mutable struct NonmonotoneCache{F} <: LineSearch.AbstractLineSearchCache
+# Cache parametric on element type T derived from the problem's u0.
+mutable struct NonmonotoneCache{T<:AbstractFloat, F} <: LineSearch.AbstractLineSearchCache
     F::F
     alg::NonmonotoneArmijo
-    z_cache::Vector{Float64}
-    fu_cache::Vector{Float64}
-    history::Vector{Float64}   # recent ‖F(z)‖² values
+    z_cache::Vector{T}
+    fu_cache::Vector{T}
+    history::Vector{T}   # recent ‖F(z)‖² values
     n_evals::Int
 end
 
@@ -244,14 +254,15 @@ DFMethods.direction!(d::AbstractVector, rule::MyDirection, ctx) -> d
 
 The context `ctx` is a `NamedTuple` carrying the per-iteration inputs:
 
-| Field            | Description                                                  |
-|------------------|--------------------------------------------------------------|
-| `ctx.Fw`         | $F$ at the inertial point $w_k$                              |
-| `ctx.Fw_prev`    | $F$ at the previous inertial point $w_{k-1}$                 |
-| `ctx.w`, `ctx.w_prev` | the inertial points themselves                          |
-| `ctx.d_prev`     | previous direction $d_{k-1}$                                 |
-| `ctx.k`          | iteration index (0-based)                                    |
-| `ctx.α_prev`     | previous line-search step $\alpha_{k-1}$ (`1.0` at `k = 0`)  |
+| Field                  | Description                                                  |
+|------------------------|--------------------------------------------------------------|
+| `ctx.Fw`               | $F$ at the inertial point $w_k$                              |
+| `ctx.Fw_prev`          | $F$ at the previous inertial point $w_{k-1}$                 |
+| `ctx.w`, `ctx.w_prev`  | the inertial points themselves                               |
+| `ctx.d_prev`           | previous direction $d_{k-1}$                                 |
+| `ctx.k`                | iteration index (0-based)                                    |
+| `ctx.α_prev`           | previous line-search step $\alpha_{k-1}$ (`1.0` at `k = 0`)  |
+| `ctx.direction_state`  | per-solve state from `init_state(::MyDirection, ...)`; `nothing` if undeclared |
 
 The rule mutates `d` in place. At `k = 0`, only `ctx.Fw` is meaningful;
 all other fields may be uninitialized. The framework can grow `ctx` with
@@ -331,18 +342,23 @@ struct MannIteration{A} <: AbstractIterateUpdate
     α::A   # scalar or k -> Float64
 end
 
-mutable struct MannState
-    xk::Vector{Float64}
-    proj_z::Vector{Float64}
+# State parametric on element type T derived from the projected initial
+# iterate `x` that the framework passes to init_state.
+mutable struct MannState{T<:AbstractFloat}
+    xk::Vector{T}
+    proj_z::Vector{T}
 end
 
-DFMethods.init_state(::MannIteration, prob, x0, alg) =
-    MannState(copy(collect(Float64, x0)), similar(collect(Float64, x0)))
+function DFMethods.init_state(::MannIteration, prob, x, alg)
+    T = eltype(x)
+    return MannState{T}(copy(x), similar(x))
+end
 
 function DFMethods.update_iterate!(x_new, rule::MannIteration, ctx)
-    αk = rule.α isa Number ? Float64(rule.α) : Float64(rule.α(ctx.k))
+    T  = eltype(x_new)
+    αk = T(rule.α isa Number ? rule.α : rule.α(ctx.k))
     project!(ctx.state.proj_z, ctx.z, ctx.set)
-    @. x_new = αk * ctx.state.xk + (1 - αk) * ctx.state.proj_z
+    @. x_new = αk * ctx.state.xk + (one(T) - αk) * ctx.state.proj_z
     copyto!(ctx.state.xk, x_new)
     return x_new
 end

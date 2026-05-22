@@ -44,11 +44,12 @@ function DFMethods.direction!(d, ::MPRPL, ctx)
         @. d = -Fw
         return d
     end
+    T = eltype(Fw)
 
-    Fw_y   = 0.0   # F(w_k)' y_{k-1}
-    Fwm_sq = 0.0   # ‖F(w_{k-1})‖²
-    Fw_d   = 0.0   # F(w_k)' d_{k-1}
-    Fw_sq  = 0.0   # ‖F(w_k)‖²
+    Fw_y   = zero(T)   # F(w_k)' y_{k-1}
+    Fwm_sq = zero(T)   # ‖F(w_{k-1})‖²
+    Fw_d   = zero(T)   # F(w_k)' d_{k-1}
+    Fw_sq  = zero(T)   # ‖F(w_k)‖²
     @inbounds for i in eachindex(Fw)
         yi      = Fw[i] - Fw_prev[i]
         Fw_y   += Fw[i] * yi
@@ -57,8 +58,8 @@ function DFMethods.direction!(d, ::MPRPL, ctx)
         Fw_sq  += Fw[i]^2
     end
 
-    β_PRP   = Fw_y / max(Fwm_sq, eps())
-    coeff_F = -(1.0 + β_PRP * Fw_d / max(Fw_sq, eps()))
+    β_PRP   = Fw_y / max(Fwm_sq, eps(T))
+    coeff_F = -(one(T) + β_PRP * Fw_d / max(Fw_sq, eps(T)))
 
     @inbounds @simd for i in eachindex(Fw)
         d[i] = coeff_F * Fw[i] + β_PRP * d_prev[i]

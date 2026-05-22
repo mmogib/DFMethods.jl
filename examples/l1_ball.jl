@@ -48,10 +48,12 @@ end
 #      Active count ρ = largest j with μ_j − θ_j > 0; final θ = θ_ρ.
 #   4. y_i = sign(x_i) · max(|x_i| − θ, 0).
 function DFMethods.project!(y::AbstractVector, x::AbstractVector, set::L1Ball)
-    r = set.r
+    T = eltype(y)
+    # set.r is Float64 (Approach A hyperparameter); coerce to T at boundary.
+    r = T(set.r)
 
     # Fast path: already feasible.
-    s = 0.0
+    s = zero(T)
     @inbounds for i in eachindex(x)
         s += abs(x[i])
     end
@@ -62,8 +64,8 @@ function DFMethods.project!(y::AbstractVector, x::AbstractVector, set::L1Ball)
 
     μ = sort!(abs.(x); rev = true)
 
-    cumsum_μ = 0.0
-    θ        = 0.0
+    cumsum_μ = zero(T)
+    θ        = zero(T)
     @inbounds for j in eachindex(μ)
         cumsum_μ      += μ[j]
         candidate_θ    = (cumsum_μ - r) / j
@@ -71,7 +73,7 @@ function DFMethods.project!(y::AbstractVector, x::AbstractVector, set::L1Ball)
     end
 
     @inbounds for i in eachindex(x)
-        y[i] = sign(x[i]) * max(abs(x[i]) - θ, 0.0)
+        y[i] = sign(x[i]) * max(abs(x[i]) - θ, zero(T))
     end
     return y
 end

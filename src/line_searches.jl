@@ -61,29 +61,29 @@ end
 # Common shape: callable F closure, algorithm config, scratch vectors, and
 # the n_evals counter that DFProjection reads.
 
-mutable struct ConstantBacktrackCache{F, Alg<:ConstantBacktrack} <: LineSearch.AbstractLineSearchCache
+mutable struct ConstantBacktrackCache{T<:AbstractFloat, F, Alg<:ConstantBacktrack} <: LineSearch.AbstractLineSearchCache
     F::F
     alg::Alg
-    z_cache::Vector{Float64}
-    fu_cache::Vector{Float64}
+    z_cache::Vector{T}
+    fu_cache::Vector{T}
     n_evals::Int
 end
 
-mutable struct ResidualNormBacktrackCache{F, Alg<:ResidualNormBacktrack} <: LineSearch.AbstractLineSearchCache
+mutable struct ResidualNormBacktrackCache{T<:AbstractFloat, F, Alg<:ResidualNormBacktrack} <: LineSearch.AbstractLineSearchCache
     F::F
     alg::Alg
-    z_cache::Vector{Float64}
-    fu_cache::Vector{Float64}
+    z_cache::Vector{T}
+    fu_cache::Vector{T}
     n_evals::Int
 end
 
-mutable struct AdaptiveClampedBacktrackCache{F, Alg<:AdaptiveClampedBacktrack} <: LineSearch.AbstractLineSearchCache
+mutable struct AdaptiveClampedBacktrackCache{T<:AbstractFloat, F, Alg<:AdaptiveClampedBacktrack} <: LineSearch.AbstractLineSearchCache
     F::F
     alg::Alg
-    z_cache::Vector{Float64}
-    fu_cache::Vector{Float64}
+    z_cache::Vector{T}
+    fu_cache::Vector{T}
     n_evals::Int
-    Δ::Float64
+    Δ::T
 end
 
 const _AnyDFBacktrackCache = Union{ConstantBacktrackCache,
@@ -92,12 +92,15 @@ const _AnyDFBacktrackCache = Union{ConstantBacktrackCache,
 
 # ─── γ_k formulas (dispatched on cache type) ────────────────────────────────
 
-_γ_k(::ConstantBacktrackCache,     fu) = 1.0
-_γ_k(::ResidualNormBacktrackCache, fu) = (s = 0.0; @inbounds for x in fu; s += x*x end; sqrt(s))
+_γ_k(::ConstantBacktrackCache,     fu) = one(eltype(fu))
+_γ_k(::ResidualNormBacktrackCache, fu) = (s = zero(eltype(fu)); @inbounds for x in fu; s += x*x end; sqrt(s))
 function _γ_k(c::AdaptiveClampedBacktrackCache, fu)
-    s = 0.0
+    T = eltype(fu)
+    s = zero(T)
     @inbounds for x in fu; s += x*x end
-    return clamp(sqrt(s), c.alg.lo, c.alg.lo + c.Δ)
+    # c.alg.lo is Float64 (Approach A hyperparam); coerce to T.
+    lo_T = T(c.alg.lo)
+    return clamp(sqrt(s), lo_T, lo_T + c.Δ)
 end
 
 # ─── F adapter: handle in-place vs out-of-place NonlinearProblem.f ──────────
@@ -118,9 +121,10 @@ function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
                           stats=nothing, kwargs...)
     F = _wrap_F_into(prob)
     n = length(u)
+    T = eltype(u)
     return ConstantBacktrackCache(F, alg,
-                                   Vector{Float64}(undef, n),
-                                   Vector{Float64}(undef, n),
+                                   Vector{T}(undef, n),
+                                   Vector{T}(undef, n),
                                    0)
 end
 
@@ -129,9 +133,10 @@ function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
                           stats=nothing, kwargs...)
     F = _wrap_F_into(prob)
     n = length(u)
+    T = eltype(u)
     return ResidualNormBacktrackCache(F, alg,
-                                       Vector{Float64}(undef, n),
-                                       Vector{Float64}(undef, n),
+                                       Vector{T}(undef, n),
+                                       Vector{T}(undef, n),
                                        0)
 end
 
@@ -140,24 +145,30 @@ function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
                           stats=nothing, kwargs...)
     F = _wrap_F_into(prob)
     n = length(u)
+    T = eltype(u)
     return AdaptiveClampedBacktrackCache(F, alg,
-                                          Vector{Float64}(undef, n),
-                                          Vector{Float64}(undef, n),
-                                          0, alg.Δ_init)
+                                          Vector{T}(undef, n),
+                                          Vector{T}(undef, n),
+                                          0, T(alg.Δ_init))
 end
 
 # ─── Shared backtracking driver ─────────────────────────────────────────────
 
 function _backtrack!(cache::_AnyDFBacktrackCache, u::AbstractVector, du::AbstractVector)
-    σ, ρ, maxbt = cache.alg.σ, cache.alg.ρ, cache.alg.maxbt
+    T = eltype(u)
+    # σ, ρ are Float64 hyperparameters (Approach A); coerce to T for
+    # type-stable inner loops.
+    σ     = T(cache.alg.σ)
+    ρ     = T(cache.alg.ρ)
+    maxbt = cache.alg.maxbt
     cache.n_evals = 0
 
-    d_norm_sq = 0.0
+    d_norm_sq = zero(T)
     @inbounds for j in eachindex(du)
         d_norm_sq += du[j] * du[j]
     end
 
-    α = 1.0
+    α = one(T)
     for _ in 0:maxbt
         @inbounds @simd for j in eachindex(u)
             cache.z_cache[j] = u[j] + α * du[j]
@@ -165,7 +176,7 @@ function _backtrack!(cache::_AnyDFBacktrackCache, u::AbstractVector, du::Abstrac
         cache.F(cache.fu_cache, cache.z_cache)
         cache.n_evals += 1
 
-        lhs = 0.0
+        lhs = zero(T)
         @inbounds for j in eachindex(du)
             lhs -= cache.fu_cache[j] * du[j]
         end

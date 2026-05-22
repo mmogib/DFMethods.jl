@@ -45,27 +45,31 @@ end
 # `update_iterate!`'s ctx does NOT expose `x_k` directly — only `w`
 # (which equals `x_k` only when there is no inertia). So we hold `x_k`
 # in state, refreshed on each call. We also keep scratch for `P_X(z_k)`.
-mutable struct MannState
-    xk::Vector{Float64}
-    proj_z::Vector{Float64}
+mutable struct MannState{T<:AbstractFloat}
+    xk::Vector{T}
+    proj_z::Vector{T}
 end
 
-# The framework calls this once per solve to allocate state.
-DFMethods.init_state(::MannIteration, prob, x0, alg) =
-    MannState(copy(collect(Float64, x0)), similar(collect(Float64, x0)))
+# The framework calls this once per solve to allocate state. The third
+# arg `x` is the projected, T-typed initial iterate from init_cache.
+function DFMethods.init_state(::MannIteration, prob, x, alg)
+    T = eltype(x)
+    return MannState{T}(copy(x), similar(x))
+end
 
 # ── Contract method ────────────────────────────────────────────────────
 function DFMethods.update_iterate!(x_new::AbstractVector,
                                    rule::MannIteration, ctx)
     state = ctx.state
-    αk    = rule.α isa Number ? Float64(rule.α) : Float64(rule.α(ctx.k))
+    T     = eltype(x_new)
+    αk    = T(rule.α isa Number ? rule.α : rule.α(ctx.k))
 
     # Project the trial point z onto the feasibility set X.
     project!(state.proj_z, ctx.z, ctx.set)
 
     # x_{k+1} = α_k · x_k + (1 − α_k) · P_X(z_k)
     @inbounds @simd for i in eachindex(x_new)
-        x_new[i] = αk * state.xk[i] + (1 - αk) * state.proj_z[i]
+        x_new[i] = αk * state.xk[i] + (one(T) - αk) * state.proj_z[i]
     end
 
     # Update state for next iteration: state.xk ← x_new.

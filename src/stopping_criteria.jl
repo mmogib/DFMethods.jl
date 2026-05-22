@@ -23,7 +23,7 @@ Concrete criteria override `on_event!` for their relevant event(s).
 abstract type AbstractStoppingCriterion <: AbstractCallback end
 
 # Stateless by default.
-init_state(::AbstractStoppingCriterion, prob, x0, alg) = nothing
+init_state(::AbstractStoppingCriterion, prob, x, alg) = nothing
 
 # Default: never stops. Concrete criteria override.
 on_event!(::AbstractStoppingCriterion, cache, event::Symbol) = (false, :Default)
@@ -84,7 +84,7 @@ end
 function on_event!(c::StepNormTol, cache, event::Symbol)
     event === :post_iter || return (false, :Default)
     cache.k <= 1 && return (false, :Default)   # need both x_k and x_{k-1}
-    s = 0.0
+    s = zero(eltype(cache.x))
     @inbounds for i in eachindex(cache.x)
         s += abs2(cache.x[i] - cache.x_prev[i])
     end
@@ -105,7 +105,7 @@ end
 function on_event!(c::DirectionNormTol, cache, event::Symbol)
     event === :post_iter || return (false, :Default)
     cache.k == 0 && return (false, :Default)
-    s = 0.0
+    s = zero(eltype(cache.d))
     @inbounds for i in eachindex(cache.d)
         s += abs2(cache.d[i])
     end

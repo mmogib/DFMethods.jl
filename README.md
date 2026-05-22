@@ -2,7 +2,7 @@
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mmogib.github.io/DFMethods.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mmogib.github.io/DFMethods.jl/dev/)
-[![Build Status](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml?query=branch%3Amaster)
+[![Build Status](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/mmogib/DFMethods.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/mmogib/DFMethods.jl)
 
 **Derivative-free projection methods for constrained nonlinear equations, integrated with NonlinearSolve.jl.**
@@ -13,108 +13,30 @@ $$\text{Find } u^* \in X \subset \mathbb{R}^n \text{ such that } F(u^*) = 0,$$
 
 where $X$ is closed convex and $F$ is continuous and (pseudo-)monotone. **No derivatives required.**
 
-## Status
-
-A generic derivative-free projection framework with pluggable search direction, line search, iterate-update strategy, inertial rule, constraint set, and callbacks. The algorithm itself is problem-agnostic; the feasible set is a property of the problem, not the algorithm. See [`CHANGELOG.md`](CHANGELOG.md) for the per-version capability surface.
-
-## Where it sits in the Julia ecosystem
-
-| | Constrained? | Derivative-free? | Approach |
-|---|---|---|---|
-| NonlinearSolve.jl `DFSane` / `SimpleDFSane` | ✗ | ✓ | spectral residual |
-| NonlinearSolve.jl `Broyden` / `Klement` / `LimitedMemoryBroyden` | ✗ (incl. box for some) | ✓ (secant) | quasi-Newton |
-| NonlinearSolve.jl JFNK (Newton + Krylov) | ✗ | ✓ (matrix-free) | Newton–Krylov |
-| NLboxsolve.jl | box only | ✗ | Newton/QN |
-| ProximalAlgorithms.jl / SPGBox.jl | ✓ | ✗ | minimization |
-| **DFMethods.jl** | **any closed convex (incl. ℝⁿ)** | **✓** | **projection-based** |
-
-DFMethods.jl complements the SciML-native derivative-free options (spectral-residual DF-SANE, quasi-Newton secant methods, matrix-free Newton–Krylov) — all of which target the unconstrained case — by extending the problem class to **any closed convex feasibility set** under a (pseudo-)monotone $F$, with the unconstrained case recovered as $X = \mathbb{R}^n$ (where $P_X = \mathrm{id}$). The framework offers derivative-free CG-style search directions, three pluggable iterate-update strategies (Solodov–Svaiter hyperplane projection, direct projection, Halpern anchoring), and pluggable line search / inertia / constraint set / callbacks.
-
 ## Install
 
-From the Julia General registry:
-
 ```julia
-using Pkg
-Pkg.add("DFMethods")
-```
-
-Or, equivalently, from the REPL's Pkg mode:
-
-```
 ] add DFMethods
 ```
 
-To track the latest unreleased changes directly from GitHub:
+Full installation options (registry, REPL, unreleased-from-GitHub) are on the [docs home page](https://mmogib.github.io/DFMethods.jl/stable/#Installation).
 
-```julia
-using Pkg
-Pkg.add(url = "https://github.com/mmogib/DFMethods.jl")
-```
+## Documentation
 
-## Quickstart
+Full documentation: <https://mmogib.github.io/DFMethods.jl/stable/>.
 
-```julia
-using NonlinearSolve, DFMethods
-
-# F : R^n → R^n  (out-of-place; in-place f!(du, u, p) also supported)
-F(u, p) = u .- p
-
-# Unconstrained
-prob = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2])
-sol  = solve(prob, DFProjection())
-sol.u             # ≈ [0.3, -0.2]
-sol.retcode       # ReturnCode.Success
-sol.stats.nf      # number of F evaluations
-sol.stats.nsteps  # outer iterations
-```
-
-Box constraints flow through SciML's standard `lb` / `ub` kwargs:
-
-```julia
-prob_box = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2];
-                            lb = [-1.0, -1.0], ub = [1.0, 1.0])
-sol_box  = solve(prob_box, DFProjection())
-```
-
-For arbitrary closed convex sets, wrap with `ConstrainedNonlinearProblem`:
-
-```julia
-inner = NonlinearProblem(F, [1.0, -1.0], [0.3, -0.2])
-prob_hs = ConstrainedNonlinearProblem(inner, HalfSpace([1.0, 1.0], 0.5))
-sol_hs  = solve(prob_hs, DFProjection())
-```
-
-The same `DFProjection()` instance solves all three problems — the constraint set lives on the problem.
-
-See the [Quickstart](https://mmogib.github.io/DFMethods.jl/stable/quickstart/) and [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) pages of the docs for callbacks, custom directions / line searches, and lower-level access.
-
-## Algorithm
-
-A configurable framework for derivative-free projection methods. One outer iteration:
-
-> inertial extrapolation → derivative-free search direction → backtracking line search → trial point → iterate update (Solodov–Svaiter hyperplane projection, direct projection, or Halpern anchoring).
-
-The mathematical components — Solodov–Svaiter hyperplane projection, Halpern anchoring, spectral-residual derivative-free directions, inertial extrapolation for monotone operators — draw on a body of literature spanning several decades. See the [References](https://mmogib.github.io/DFMethods.jl/stable/references/) page of the docs for the lineage of each component.
-
-## Pluggable components
-
-| Component | Abstract type | Built-in instances |
-|---|---|---|
-| Search direction | `AbstractSearchDirection` | `SpectralThreeTerm` |
-| Line search | `LineSearch.AbstractLineSearchAlgorithm` | `ConstantBacktrack`, `ResidualNormBacktrack`, `AdaptiveClampedBacktrack` |
-| Iterate update | `AbstractIterateUpdate` | `SolodovSvaiterProjection`, `DirectUpdate`, `HalpernUpdate` |
-| Inertial rule | `AbstractInertialRule` | `Inertial(θ)`, `NoInertial` |
-| Constraint set (on the problem) | `AbstractConstraintSet` | `RealSpace`, `BoxSet`, `HalfSpace`, `Intersection`, `CappedBox`, `UserSet` |
-| Stopping / observers | `AbstractCallback` | `AbsResidualTol`, `RelResidualTol`, `MaxIters`, `MaxTime`, `MaxFEvals`, `HistoryCallback`, `LoggingCallback`, … |
-
-Each is a small struct with one required method; see the [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) page of the docs.
+- [Quickstart](https://mmogib.github.io/DFMethods.jl/stable/quickstart/) — runnable examples for unconstrained, box, and convex-set problems
+- [Algorithm](https://mmogib.github.io/DFMethods.jl/stable/algorithm/) — the outer-iteration structure and pluggable components
+- [Constraint Sets](https://mmogib.github.io/DFMethods.jl/stable/constraints/) — built-in feasibility sets and `ConstrainedNonlinearProblem`
+- [Extending](https://mmogib.github.io/DFMethods.jl/stable/extending/) — define your own search direction, line search, iterate update, …
+- [Comparisons](https://mmogib.github.io/DFMethods.jl/stable/comparisons/) — DFMethods.jl vs related Julia packages
+- [API Reference](https://mmogib.github.io/DFMethods.jl/stable/api/)
 
 ## Citation
 
-If you use DFMethods.jl in research, please cite **the software**. A formal software-citation entry (`@software{...}` with a Zenodo DOI) will accompany the first tagged release; until then, please cite the package by name, version, and the GitHub URL `https://github.com/mmogib/DFMethods.jl`.
+The current release's citation metadata is in [`CITATION.cff`](CITATION.cff) — GitHub's *Cite this repository* button reads this file. A formal `@software{}` BibTeX block with the Zenodo DOI is added after each tagged release; see the [GitHub Releases page](https://github.com/mmogib/DFMethods.jl/releases).
 
-The package implements components drawn from a body of theoretical literature. If you build on a specific component or rely on a specific convergence result, please additionally cite the originating source; see the [References](https://mmogib.github.io/DFMethods.jl/stable/references/) page of the docs.
+If you build on a specific algorithmic component, please additionally cite the originating source — each component's docstring names it with a DOI link.
 
 ## License
 

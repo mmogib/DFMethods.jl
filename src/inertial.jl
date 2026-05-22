@@ -62,7 +62,7 @@ for inertial schemes of this class. Lineage: Alvarez & Attouch (2001)
 introduced the heavy-ball / inertial idea for monotone operators;
 Maingé (2008) gave the modern form for inertial KM-type algorithms;
 the specific `1/k²` cap used here is the form adopted by recent
-derivative-free projection methods (see References).
+derivative-free projection methods.
 
 ```jldoctest
 julia> Inertial().θ
@@ -86,15 +86,18 @@ end
 function inertial_coef(rule::Inertial, k::Int,
                        xk::AbstractVector, xkm1::AbstractVector)
     k == 0 && return 0.0   # no inertia at k=0 (no x_{-1})
-    diff_norm_sq = 0.0
+    diff_norm_sq = zero(eltype(xk))
     @inbounds for i in eachindex(xk)
         diff_norm_sq += abs2(xk[i] - xkm1[i])
     end
     diff_norm = sqrt(diff_norm_sq)
     if diff_norm > 0
-        return min(rule.θ, 1.0 / (k^2 * diff_norm))
+        # Float64 wrap enforces the docstring contract for any eltype(xk),
+        # including BigFloat where `1.0 / (k^2 * BigFloat)` would otherwise
+        # promote to BigFloat. apply_inertial! coerces θ back to T anyway.
+        return Float64(min(rule.θ, 1.0 / (k^2 * diff_norm)))
     else
-        return rule.θ
+        return rule.θ   # already Float64 (struct field)
     end
 end
 
@@ -109,9 +112,11 @@ Compute ``w = x_k + θ_k (x_k - x_{k-1})`` in place, returning ``θ_k`` too.
 """
 function apply_inertial!(w::AbstractVector, rule::AbstractInertialRule,
                          k::Int, xk::AbstractVector, xkm1::AbstractVector)
-    θ = inertial_coef(rule, k, xk, xkm1)
+    θ = inertial_coef(rule, k, xk, xkm1)   # Float64 per contract
+    T = eltype(w)
+    θ_T = T(θ)
     @inbounds @simd for i in eachindex(xk)
-        w[i] = xk[i] + θ * (xk[i] - xkm1[i])
+        w[i] = xk[i] + θ_T * (xk[i] - xkm1[i])
     end
     return (w, θ)
 end

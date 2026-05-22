@@ -35,12 +35,12 @@ Base.@kwdef struct NonmonotoneArmijo <: LineSearch.AbstractLineSearchAlgorithm
 end
 
 # ── Cache: mutable, holds the residual history across solve! calls ────
-mutable struct NonmonotoneCache{F} <: LineSearch.AbstractLineSearchCache
+mutable struct NonmonotoneCache{T<:AbstractFloat, F} <: LineSearch.AbstractLineSearchCache
     F::F
     alg::NonmonotoneArmijo
-    z_cache::Vector{Float64}
-    fu_cache::Vector{Float64}
-    history::Vector{Float64}   # recent ‖F(z)‖² values (oldest first)
+    z_cache::Vector{T}
+    fu_cache::Vector{T}
+    history::Vector{T}         # recent ‖F(z)‖² values (oldest first)
     n_evals::Int
 end
 
@@ -57,29 +57,35 @@ end
 # ── `init` returns the cache. Called once per solve, at init_cache time. ──
 function CommonSolve.init(prob::SciMLBase.NonlinearProblem,
                           alg::NonmonotoneArmijo, fu, u; kwargs...)
+    T = eltype(u)
     return NonmonotoneCache(_wrap_F(prob), alg,
-                            Vector{Float64}(undef, length(u)),
-                            Vector{Float64}(undef, length(u)),
-                            Float64[],   # empty history at solve start
+                            Vector{T}(undef, length(u)),
+                            Vector{T}(undef, length(u)),
+                            T[],         # empty history at solve start
                             0)
 end
 
 # ── `solve!` performs the backtracking search; updates history on accept. ──
 function CommonSolve.solve!(cache::NonmonotoneCache,
                             u::AbstractVector, du::AbstractVector)
-    σ, ρ, M, maxbt = cache.alg.σ, cache.alg.ρ, cache.alg.memory, cache.alg.maxbt
+    T = eltype(u)
+    # σ, ρ are Float64 hyperparameters (Approach A); coerce to T at boundary.
+    σ     = T(cache.alg.σ)
+    ρ     = T(cache.alg.ρ)
+    M     = cache.alg.memory
+    maxbt = cache.alg.maxbt
     cache.n_evals = 0
 
-    d_norm_sq = 0.0
+    d_norm_sq = zero(T)
     @inbounds for j in eachindex(du)
         d_norm_sq += du[j] * du[j]
     end
 
     # Non-monotone reference: max of recent ‖F‖²; +Inf on first iteration
     # accepts any step that produces a finite residual.
-    Fmax_sq = isempty(cache.history) ? Inf : maximum(cache.history)
+    Fmax_sq = isempty(cache.history) ? T(Inf) : maximum(cache.history)
 
-    α = 1.0
+    α = one(T)
     for _ in 0:maxbt
         @inbounds @simd for j in eachindex(u)
             cache.z_cache[j] = u[j] + α * du[j]
