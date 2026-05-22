@@ -19,6 +19,40 @@ function DFMethods.direction!(d, ::_RecorderDir, ctx)
     return d
 end
 
+# Stateful direction for testing init_state → ctx.direction_state plumbing
+# (Phase 2). init_state allocates a call counter; direction! increments it
+# via ctx.direction_state; the test asserts the count via
+# cache.inner.direction_state. Would have failed on v0.2 (ctx had no
+# `direction_state` field).
+struct _CountingDir <: AbstractSearchDirection end
+mutable struct _CountingState
+    calls::Int
+end
+DFMethods.init_state(::_CountingDir, prob, x0, alg) = _CountingState(0)
+function DFMethods.direction!(d, ::_CountingDir, ctx)
+    ctx.direction_state.calls += 1
+    @. d = -ctx.Fw   # steepest descent
+    return d
+end
+
+# Schema-pin sentinels: capture `keys(ctx)` so the corresponding testsets
+# can assert that the live ctx field-sets still match docs/src/extending.md.
+struct _DirCtxCapture <: AbstractSearchDirection end
+const _CAPTURED_DIR_CTX = Ref{Tuple}(())
+function DFMethods.direction!(d, ::_DirCtxCapture, ctx)
+    _CAPTURED_DIR_CTX[] = keys(ctx)
+    @. d = -ctx.Fw   # steepest descent
+    return d
+end
+
+struct _IUCtxCapture <: AbstractIterateUpdate end
+const _CAPTURED_IU_CTX = Ref{Tuple}(())
+function DFMethods.update_iterate!(x_new, ::_IUCtxCapture, ctx)
+    _CAPTURED_IU_CTX[] = keys(ctx)
+    @. x_new = ctx.z   # accept trial point as next iterate
+    return x_new
+end
+
 @testset "DFMethods.jl" begin
 
     # ========================================================================
@@ -600,13 +634,74 @@ end
             @test 0 < _RECORDED_ALPHA_PREV[] <= 1.0
         end
 
+        @testset "direction_state surfaced through ctx (Phase 2 regression)" begin
+            # Uses _CountingDir + _CountingState defined at top of file.
+            # init_state allocates state on cache.direction_state; the
+            # framework passes it as ctx.direction_state to direction!;
+            # mutations there are visible back on the cache. Would have
+            # failed on v0.2 (no `direction_state` in direction!'s ctx).
+            F(u, p) = u .- sin.(u)
+            prob = SciMLBase.NonlinearProblem(F, ones(10))
+            alg = DFProjection(;
+                direction = _CountingDir(),
+                inertial  = NoInertial(),
+                maxiters  = 5,
+            )
+            cache = init(prob, alg)
+
+            @test cache.inner.direction_state isa _CountingState
+            @test cache.inner.direction_state.calls == 0
+
+            step!(cache)
+            @test cache.inner.direction_state.calls == 1
+
+            step!(cache)
+            @test cache.inner.direction_state.calls == 2
+        end
+
+        @testset "ctx schema pin — direction! (catches doc drift)" begin
+            # If this assertion fails, the direction! ctx schema has changed.
+            # Update the docs FIRST, then update the expected tuple here:
+            #   - docs/src/extending.md §0 *direction! ctx — N fields* table
+            #   - docs/src/extending.md §2 *Search direction* ctx table
+            _CAPTURED_DIR_CTX[] = ()
+            F(u, p) = u .- sin.(u)
+            prob = SciMLBase.NonlinearProblem(F, ones(5))
+            alg = DFProjection(;
+                direction = _DirCtxCapture(),
+                inertial  = NoInertial(),
+                maxiters  = 1,
+            )
+            cache = init(prob, alg)
+            step!(cache)
+            @test _CAPTURED_DIR_CTX[] === (:Fw, :Fw_prev, :w, :w_prev, :d_prev, :k, :α_prev, :direction_state)
+        end
+
+        @testset "ctx schema pin — update_iterate! (catches doc drift)" begin
+            # If this assertion fails, the update_iterate! ctx schema has
+            # changed. Update the docs FIRST, then the expected tuple here:
+            #   - docs/src/extending.md §0 *update_iterate! ctx — N fields*
+            #   - docs/src/extending.md §3 *Iterate update* ctx description
+            _CAPTURED_IU_CTX[] = ()
+            F(u, p) = u .- sin.(u)
+            prob = SciMLBase.NonlinearProblem(F, ones(5))
+            alg = DFProjection(;
+                iterate_update = _IUCtxCapture(),
+                inertial       = NoInertial(),
+                maxiters       = 1,
+            )
+            cache = init(prob, alg)
+            step!(cache)
+            @test _CAPTURED_IU_CTX[] === (:w, :d, :α, :z, :Fw, :Fz, :set, :k, :ζ, :inner_maxiter, :state)
+        end
+
         @testset "NonlinearSolution fields from solve" begin
             f(u, p) = copy(u)
             prob = SciMLBase.NonlinearProblem(f, [0.5, 0.5])
             sol = solve(prob, DFProjection(; maxiters=100))
             @test sol isa SciMLBase.AbstractNonlinearSolution
-            @test sol.u isa Vector{Float64}
-            @test sol.resid isa Vector{Float64}
+            @test sol.u isa Vector{<:AbstractFloat}
+            @test sol.resid isa Vector{<:AbstractFloat}
             @test sol.stats.nsteps >= 0
             @test sol.stats.nf    >= 1
             @test sol.retcode    isa SciMLBase.ReturnCode.T
@@ -650,7 +745,7 @@ end
             @test length(hist.history) >= 1
             for row in hist.history
                 @test row.k isa Integer
-                @test row.F_norm isa Float64
+                @test row.F_norm isa AbstractFloat
             end
         end
 
@@ -946,12 +1041,72 @@ end
             f(u, p) = copy(u)
             prob = SciMLBase.NonlinearProblem(f, [0.5])
             sol = solve(prob, DFProjection(; maxiters = 100))
-            @test sol.u isa Vector{Float64}
-            @test sol.resid isa Vector{Float64}
+            @test sol.u isa Vector{<:AbstractFloat}
+            @test sol.resid isa Vector{<:AbstractFloat}
             @test length(sol.resid) == length(sol.u)
             @test sol.alg isa DFProjection
         end
 
     end  # SciMLBase integration
+
+    # ========================================================================
+    # Element-type genericity (v0.3.0)
+    # ========================================================================
+
+    @testset "Element-type genericity (v0.3.0)" begin
+        # Test problem: F(u) = u - sin(u), root at u = 0.
+        F_t(u, p) = u .- sin.(u)
+
+        @testset "Float32 — default config end-to-end" begin
+            prob = SciMLBase.NonlinearProblem(F_t, Float32.(ones(10)))
+            sol = solve(prob, DFProjection(); abstol = 1f-5, maxiters = 100)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test eltype(sol.u)     === Float32
+            @test eltype(sol.resid) === Float32
+            # F(u) = u - sin(u) has a cubic-residual root; test the residual
+            # convergence criterion, not iterate distance from u=0.
+            @test norm(sol.resid) <= 1f-5
+        end
+
+        @testset "Float32 — alternate components (DirectUpdate + ConstantBacktrack + NoInertial)" begin
+            prob = SciMLBase.NonlinearProblem(F_t, Float32.(ones(5)))
+            alg = DFProjection(;
+                iterate_update = DirectUpdate(),
+                linesearch     = ConstantBacktrack(σ = 0.01, ρ = 0.5),
+                inertial       = NoInertial(),
+                abstol         = 1f-4,
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test eltype(sol.u) === Float32
+        end
+
+        @testset "Float32 — box constraints" begin
+            n = 5
+            prob = SciMLBase.NonlinearProblem(F_t, Float32.(ones(n));
+                                              lb = Float32.(fill(-2, n)),
+                                              ub = Float32.(fill(2, n)))
+            sol = solve(prob, DFProjection(); abstol = 1f-5, maxiters = 100)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test eltype(sol.u) === Float32
+            @test all(-2.0f0 .<= sol.u .<= 2.0f0)
+        end
+
+        @testset "BigFloat — high-precision sanity (≤5 s budget)" begin
+            # Per Q3 (a) design decision: keep BigFloat coverage minimal.
+            # n = 3 keeps per-iteration cost low; tight abstol exercises
+            # precision well below Float64's reach.
+            prob = SciMLBase.NonlinearProblem(F_t, BigFloat.(ones(3)))
+            sol = solve(prob, DFProjection(); abstol = BigFloat(1e-30),
+                                              maxiters = 200)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test eltype(sol.u)     === BigFloat
+            @test eltype(sol.resid) === BigFloat
+            # Residual precision well below Float64's eps — a Float64 solve
+            # could never achieve this regardless of iterate count.
+            @test norm(sol.resid) < eps(Float64)
+        end
+    end
 
 end  # @testset "DFMethods.jl"

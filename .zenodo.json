@@ -1,0 +1,21 @@
+{
+  "title": "DFMethods.jl: A configurable framework for derivative-free projection methods for constrained nonlinear equations",
+  "description": "<p>DFMethods.jl provides a configurable framework for derivative-free projection methods for solving constrained nonlinear equations F(x) = 0 over closed convex feasibility sets, integrated with NonlinearSolve.jl. Components &mdash; search direction, line search, iterate-update strategy, inertial rule, constraint set, stopping criteria, and callbacks &mdash; are independently pluggable.</p>",
+  "creators": [
+    {
+      "name": "Alshahrani, Mohammed",
+      "affiliation": "King Fahd University of Petroleum and Minerals",
+      "orcid": "0000-0002-1367-646X"
+    }
+  ],
+  "license": "MIT",
+  "keywords": [
+    "derivative-free",
+    "nonlinear-equations",
+    "projection-methods",
+    "monotone-operators",
+    "julia"
+  ],
+  "upload_type": "software",
+  "access_right": "open"
+}

@@ -193,6 +193,14 @@ end
 # CappedBox: Ω(a, b, c) = [a, b]^n ∩ {x : Σ x_i ≤ c}
 # ============================================================================
 
+# Bisection convergence tolerances for CappedBox.project!.
+# F64 behavior preserved exactly (legacy 1e-12 / 1e-14); F32 / BigFloat use
+# eps(T)-scaled bounds per Q1 design decision (a).
+_cappedbox_tol_s(::Type{Float64}) = 1e-12
+_cappedbox_tol_s(::Type{T}) where T<:AbstractFloat = sqrt(eps(T))
+_cappedbox_tol_λ(::Type{Float64}) = 1e-14
+_cappedbox_tol_λ(::Type{T}) where T<:AbstractFloat = eps(T)
+
 """
     CappedBox(a, b, c)
 
@@ -252,20 +260,22 @@ function project!(y::AbstractVector, x::AbstractVector, set::CappedBox)
     #   λ_lo = 0   (S(0) > c, by the case 1 fall-through)
     #   λ_hi: pick large enough that S(λ_hi) ≤ c. Any λ ≥ max_i(x_i - a)
     #         makes every component clamp to `a`, giving S = n·a ≤ c.
-    x_max = -Inf
+    x_max = typemin(eltype(x))
     @inbounds for i in 1:n
         x_max = max(x_max, x[i] - a)
     end
     λ_lo = zero(eltype(y))
     λ_hi = max(x_max, oneunit(eltype(y)))
 
+    tol_s = _cappedbox_tol_s(eltype(x))
+    tol_λ = _cappedbox_tol_λ(eltype(x))
     for _ in 1:100
         λ = (λ_lo + λ_hi) / 2
         s = zero(eltype(y))
         @inbounds for i in 1:n
             s += clamp(x[i] - λ, a, b)
         end
-        if abs(s - c) < 1e-12 || (λ_hi - λ_lo) < 1e-14
+        if abs(s - c) < tol_s || (λ_hi - λ_lo) < tol_λ
             λ_lo = λ_hi = λ
             break
         elseif s > c

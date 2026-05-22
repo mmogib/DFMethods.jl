@@ -33,7 +33,9 @@ function _wrap_problem_F(prob::SciMLBase.NonlinearProblem)
     p = prob.p
     u0 = prob.u0
     if SciMLBase.isinplace(f)
-        out_buf = Vector{eltype(u0)}(undef, length(u0))
+        # Match init_cache's T derivation: floats pass through; Int → Float64.
+        T = eltype(u0) <: AbstractFloat ? eltype(u0) : Float64
+        out_buf = Vector{T}(undef, length(u0))
         return function (x)
             f(out_buf, x, p)
             return copy(out_buf)
@@ -75,9 +77,12 @@ function _constraint_set(prob::SciMLBase.NonlinearProblem)
     if lb === nothing && ub === nothing
         return RealSpace()
     end
-    n = length(prob.u0)
-    lo = lb === nothing ? fill(-Inf, n) : collect(Float64, lb)
-    hi = ub === nothing ? fill(+Inf, n) : collect(Float64, ub)
+    u0 = prob.u0
+    n = length(u0)
+    # Match init_cache's T derivation: floats pass through; Int → Float64.
+    T = eltype(u0) <: AbstractFloat ? eltype(u0) : Float64
+    lo = lb === nothing ? fill(typemin(T), n) : collect(T, lb)
+    hi = ub === nothing ? fill(typemax(T), n) : collect(T, ub)
     return BoxSet(lo, hi)
 end
 
@@ -163,7 +168,9 @@ function CommonSolve.init(prob::Union{SciMLBase.NonlinearProblem,
                           maxiters::Int = alg.maxiters,
                           kwargs...)
     F       = _wrap_problem_F(prob)
-    x0      = collect(Float64, _problem_u0(prob))
+    # Preserve eltype of u0; init_cache derives T from this (with Int → Float64
+    # fallback). The foundational change for end-to-end T-genericity in v0.3.0.
+    x0      = collect(_problem_u0(prob))
     set     = _constraint_set(prob)
     alg_eff = _alg_with_overrides(alg, abstol, maxiters)
     inner   = init_cache(F, x0, alg_eff; set = set)
@@ -189,7 +196,7 @@ function CommonSolve.solve!(cache::DFSciMLCache)
     # without setting it via an early-return branch.
     if isnan(inner.resid)
         Fx_final = inner.F(inner.x)
-        s = 0.0
+        s = zero(eltype(Fx_final))
         @inbounds for i in eachindex(Fx_final)
             s += Fx_final[i] * Fx_final[i]
         end

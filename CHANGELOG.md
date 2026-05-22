@@ -5,6 +5,127 @@ All notable changes to **DFMethods.jl** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-22
+
+Element-type genericity, direction-state ctx surfacing, documentation
+professionalization, and the package's first Zenodo DOI. The
+`DFProjectionCache` and all built-in components become parametric on
+element type `T <: AbstractFloat`, lifting the v0.1.0 "Float64-only"
+limitation. Algorithms now solve in `Float32`, `Float64`, or `BigFloat`
+end-to-end (T flows from the problem's `eltype(u0)` with `Float64`
+fallback for non-floating eltypes; algorithm-parameter struct fields stay
+`Float64` and coerce at the boundary — matches the LineSearch.jl /
+NonlinearSolve.jl / Optim.jl / DiffEq.jl convention). 242/242 tests pass.
+
+### Added
+
+- **Element-type genericity** (lifts v0.1.0 known limitation):
+  - `DFProjectionCache{T, Alg, F, S, DirState, LSCache, IUpState, StopState}`
+    parametric on `T <: AbstractFloat`.
+  - All built-in components T-aware: search direction
+    (`SpectralThreeTerm`), line searches (`ConstantBacktrack`,
+    `ResidualNormBacktrack`, `AdaptiveClampedBacktrack`),
+    iterate-update strategies (`SolodovSvaiterProjection`,
+    `HalpernUpdate`, `DirectUpdate`), inertial rules (`Inertial`,
+    `NoInertial`), constraint sets (`BoxSet`, `HalfSpace`, `CappedBox`,
+    `Intersection`), stopping criteria, projection helper
+    (`approx_project_X_halfspace!`).
+  - `init_cache` derives `T = eltype(x0) <: AbstractFloat ? eltype(x0)
+    : Float64` and allocates all per-iteration buffers as `Vector{T}`.
+  - Public path: `solve(NonlinearProblem(F, Float32.(u0)), DFProjection())`
+    produces a `Vector{Float32}` cache + `Vector{Float32}` `sol.u` +
+    `Vector{Float32}` `sol.resid` end-to-end.
+  - New test coverage: three `Float32` smoke testsets (default config,
+    alternate components, box-constrained) + one `BigFloat` sanity
+    testset (n=3, ≤5 s budget). 229 → 242 tests.
+  - Five `examples/` files (`mprpl_direction.jl`, `nonmonotone_armijo.jl`,
+    `mann_iteration.jl`, `l1_ball.jl`, `mainge_inertia.jl`) updated to
+    the parametric pattern so they remain valid templates for users.
+- **`direction!` ctx gains a `direction_state` field** (8 fields total).
+  Routes `init_state(::AbstractSearchDirection, ...)` output through to
+  custom directions. Closes the v0.2.1 known limitation. Two new
+  schema-pinning tests (`direction!` ctx + `update_iterate!` ctx)
+  catch doc/code drift via CI.
+- **Runtime ctx introspection**: `keys(ctx)` returns the live field
+  tuple inside any custom rule. Documented in `extending.md` §0
+  "Mutation policy" alongside the schema-pinning convention.
+- `docs/src/index.md` gains an `## Installation` section — canonical
+  home for install instructions; previously only in the README.
+- `CITATION.cff` (Citation File Format v1.2.0) at the package root.
+  Lights up GitHub's *Cite this repository* button and feeds Zenodo
+  metadata; carries author ORCID.
+- `.zenodo.json` at the package root. Zenodo metadata override (creator
+  with ORCID, keywords, license, upload_type).
+
+### Changed
+
+- `README.md` slimmed from 121 → 43 lines: no runnable code, no
+  ecosystem-positioning table, no pluggable-components table. All
+  duplicated content lives canonically in the docs site with link-list
+  pointers in the README. Eliminates a recurring drift surface
+  (README quickstart and docs quickstart had diverged).
+- README build-status badge URL fixed: `?query=branch%3Amaster` →
+  `?query=branch%3Amain` (mismatch with the actual default branch).
+- `docs/src/extending.md` §0 ctx field tables now type fields as
+  `Vector{T}` / `T` instead of `Vector{Float64}` / `Float64`; new
+  explanatory note that `T = eltype(x0)` with `Float64` fallback.
+- `CappedBox.project!` bisection tolerances are now T-adaptive via
+  internal dispatch helpers. F64 behavior preserved exactly (still
+  `1e-12` / `1e-14`); F32 / BigFloat use `sqrt(eps(T))` scaling.
+- `_constraint_set` (the resolver for `prob.lb`/`prob.ub`) now derives
+  T from `eltype(prob.u0)` and creates `BoxSet{T}` with `typemin(T)` /
+  `typemax(T)` infinities (previously hard-coded `-Inf`/`+Inf`).
+
+### Fixed
+
+- **Dead-link leftovers from v0.2.1's docs-hygiene pass** (the
+  `References` docs page was deleted but three pointers were missed):
+  `src/inertial.jl:65`, `src/search_directions.jl:41`, and the
+  `SpectralThreeTerm` source-file comment now carries the inline DOI
+  https://doi.org/10.1007/s11075-023-01679-7 instead of pointing at a
+  non-existent page.
+- **Latent bug — `HalpernState.init_state` force-coerced `x0` to
+  `Float64`** via `copy(collect(Float64, x0))`, even for Float32 /
+  BigFloat problems. Now preserves `eltype(x)` (T-typed buffers).
+  Bonus: Halpern's anchor is the *projected feasible* `x_0`, not the
+  user's possibly-infeasible raw input (init_state's argument is now
+  the projected `x` rather than raw `x0`).
+- **Latent bug — `_wrap_problem_F` (in-place case) used `eltype(u0)`**
+  for `out_buf` while the cache was always `Float64`, causing an in-place
+  `F!(out, x, p)` to receive a `Vector{Int}` `out` when the user passed
+  an integer-typed `u0`. After v0.3.0, `out_buf`'s element type matches
+  the cache's `T` (with Int → Float64 fallback applied uniformly).
+- `algorithm.jl` degenerate-residual guard `eps()` → `eps(typeof(...))`
+  so the threshold respects the working precision (critical for
+  `Float32` where `eps(Float64)` is below precision and the wrong
+  threshold to use).
+- `DFProjectionCache` docstring's type signature previously omitted
+  the `S` (constraint set) parameter. Now correctly includes both
+  `T` and `S`.
+
+### Compatibility
+
+- Julia ≥ 1.10 (unchanged).
+- Direct deps unchanged from v0.2.x: `CommonSolve` v0.2.x,
+  `LineSearch` v0.1.x, `SciMLBase` v2.53+.
+- **Backward-compatible behavior for v0.2.x Float64 user code**: zero
+  observable change. All 229 v0.2.1 tests pass unchanged; 13 new
+  T-genericity tests added for a total of 242.
+- **Type-level breaking**: code that explicitly dispatched on
+  `DFProjectionCache{Alg, F, S, ...}` (the v0.2.x type signature
+  without a leading `T`) needs updating to
+  `DFProjectionCache{T, Alg, F, S, ...}`. Practically unaffected — the
+  parametric type is internal-but-reachable; user code calls
+  `init_cache(F, x0, alg)` and consumes a `cache` whose concrete type
+  is inferred at call site.
+
+### Known limitations
+
+The two v0.2.1 / v0.1.0 limitations are both lifted in v0.3.0:
+direction-state ctx surfacing (closed) and Float64-only element type
+(closed — Float32, BigFloat, and any `T <: AbstractFloat` supported
+end-to-end).
+
 ## [0.2.1] — 2026-05-20
 
 Documentation hygiene and extension-contract normalization. Removes
@@ -159,6 +280,7 @@ for constrained nonlinear equations $F(x) = 0$ on a closed convex set $X$.
 - `SciMLBase` v2.x
 - `CommonSolve` v0.2.x
 
+[0.3.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.0
 [0.2.1]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.1.0

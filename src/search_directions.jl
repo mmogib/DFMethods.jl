@@ -16,17 +16,20 @@ direction!(d, rule, ctx)
 ```
 
 where the output direction `d` is written in place and `ctx` is a
-NamedTuple carrying the per-iteration cache state. The fields are:
+NamedTuple carrying the per-iteration cache state. The vector fields
+alias into the [`DFProjectionCache`](@ref) buffers, parametric on
+element type `T`, where `T = eltype(x0) <: AbstractFloat` (with
+`Float64` fallback if `eltype(x0)` is not floating). The fields are:
 
 | Field | Type | Description |
 |---|---|---|
-| `ctx.Fw` | `Vector{Float64}` | ``F`` at the inertial point ``w_k`` |
-| `ctx.Fw_prev` | `Vector{Float64}` | ``F`` at the previous inertial point ``w_{k-1}`` |
-| `ctx.w` | `Vector{Float64}` | inertial point ``w_k`` |
-| `ctx.w_prev` | `Vector{Float64}` | previous inertial point ``w_{k-1}`` |
-| `ctx.d_prev` | `Vector{Float64}` | previous direction ``d_{k-1}`` |
+| `ctx.Fw` | `Vector{T}` | ``F`` at the inertial point ``w_k`` |
+| `ctx.Fw_prev` | `Vector{T}` | ``F`` at the previous inertial point ``w_{k-1}`` |
+| `ctx.w` | `Vector{T}` | inertial point ``w_k`` |
+| `ctx.w_prev` | `Vector{T}` | previous inertial point ``w_{k-1}`` |
+| `ctx.d_prev` | `Vector{T}` | previous direction ``d_{k-1}`` |
 | `ctx.k` | `Int` | iteration index (0-based) |
-| `ctx.α_prev` | `Float64` | previous line-search step ``\\alpha_{k-1}``; `1.0` at `k = 0` |
+| `ctx.α_prev` | `T` | previous line-search step ``\\alpha_{k-1}``; `one(T)` at `k = 0` |
 
 A rule that doesn't need a given field simply ignores it. New cache
 fields can be added in future versions without breaking existing
@@ -37,18 +40,17 @@ uninitialized. Rules typically set `d = -Fw` at `k = 0`.
 
 The convergence theory for this class of algorithms requires sufficient
 descent (`-Fw' d ≥ c‖Fw‖²`) and boundedness (`‖d‖ ≤ c̄‖Fw‖`). It is
-the rule author's responsibility to ensure these hold; see the
-References page for theoretical sources.
+the rule author's responsibility to ensure these hold.
 """
 abstract type AbstractSearchDirection end
 
 # Default: direction rules are stateless (see init_state contract in types.jl).
-init_state(::AbstractSearchDirection, prob, x0, alg) = nothing
+init_state(::AbstractSearchDirection, prob, x, alg) = nothing
 
 # ============================================================================
 # SpectralThreeTerm: Spectral Three-Term Derivative-Free Projection Method
-# (Ibrahim, Alshahrani, Al-Homidan 2023, Numerical Algorithms — see the
-#  References page of the docs.)
+# (Ibrahim, Alshahrani, Al-Homidan 2023, Numerical Algorithms,
+#  https://doi.org/10.1007/s11075-023-01679-7)
 # ============================================================================
 
 """
@@ -98,6 +100,7 @@ function direction!(d::AbstractVector, rule::SpectralThreeTerm, ctx)
     w_prev  = ctx.w_prev
     d_prev  = ctx.d_prev
     k       = ctx.k
+    T       = eltype(Fw)
 
     if k == 0
         @inbounds @simd for i in eachindex(Fw)
@@ -109,13 +112,15 @@ function direction!(d::AbstractVector, rule::SpectralThreeTerm, ctx)
     # ── single pass: gather dot products ────────────────────────────────
     #   y_i  = Fw[i] - Fw_prev[i]
     #   s_i  = (w[i] - w_prev[i]) + r · y_i
-    yy_sq  = 0.0   # ‖y‖²
-    sy     = 0.0   # s' y
-    Fw_y   = 0.0   # Fw' y
-    Fw_d   = 0.0   # Fw' d_prev
-    dd_sq  = 0.0   # ‖d_prev‖²
-    Fwm_sq = 0.0   # ‖Fw_prev‖²
-    r = rule.r
+    yy_sq  = zero(T)   # ‖y‖²
+    sy     = zero(T)   # s' y
+    Fw_y   = zero(T)   # Fw' y
+    Fw_d   = zero(T)   # Fw' d_prev
+    dd_sq  = zero(T)   # ‖d_prev‖²
+    Fwm_sq = zero(T)   # ‖Fw_prev‖²
+    # rule.r and rule.alpha_bar are Float64 hyperparameters (Approach A);
+    # coerce to T here for type-stable inner loops.
+    r = T(rule.r)
     @inbounds for i in eachindex(Fw)
         yi = Fw[i] - Fw_prev[i]
         si = (w[i] - w_prev[i]) + r * yi
@@ -130,10 +135,10 @@ function direction!(d::AbstractVector, rule::SpectralThreeTerm, ctx)
     yy_norm = sqrt(yy_sq)
     dd_norm = sqrt(dd_sq)
 
-    v_k = max(rule.alpha_bar * dd_norm * yy_norm, Fwm_sq)
+    v_k = max(T(rule.alpha_bar) * dd_norm * yy_norm, Fwm_sq)
     v_k = max(v_k, eps(typeof(v_k)))   # guard against v_k = 0
 
-    ϑ_I  = yy_sq > 0 ? sy / yy_sq : 0.0
+    ϑ_I  = yy_sq > 0 ? sy / yy_sq : zero(T)
     β_k  = Fw_y / v_k
     ϑ_II = Fw_d / v_k
 

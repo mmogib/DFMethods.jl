@@ -93,15 +93,18 @@ end
 # ============================================================================
 
 """
-    DFProjectionCache{Alg, F, DirState, LSCache, IUpState, StopState}
+    DFProjectionCache{T, Alg, F, S, DirState, LSCache, IUpState, StopState}
 
 Mutable per-solve state. Created via `init_cache(F, x0, alg)`. All
 per-iteration buffers are pre-allocated; `step!` does not allocate.
 
+Parametric on element type `T <: AbstractFloat`, derived from
+`eltype(x0)` (or `Float64` if `eltype(x0)` is non-floating, e.g. `Int`).
+
 # Common state (vectors)
-- `x`, `x_prev`, `w`, `w_prev`, `z`, `d`, `d_prev` — iteration vectors.
-- `Fw`, `Fw_prev`, `Fz` — function values.
-- `x_new`, `scratch1` — generic scratch.
+- `x`, `x_prev`, `w`, `w_prev`, `z`, `d`, `d_prev` — iteration vectors, `Vector{T}`.
+- `Fw`, `Fw_prev`, `Fz` — function values, `Vector{T}`.
+- `x_new`, `scratch1` — generic scratch, `Vector{T}`.
 
 # Pluggable component state (typed via parameters)
 - `direction_state::DirState` — `init_state(alg.direction, ...)`. Default `nothing`.
@@ -112,31 +115,31 @@ per-iteration buffers are pre-allocated; `step!` does not allocate.
 # Common scalars
 - `k::Int` — iteration counter (0-based).
 - `n_evals::Int` — total F evaluations.
-- `converged::Bool`, `done::Bool`, `retcode::Symbol`, `resid::Float64`.
-- `F0_norm::Float64` — `‖F(x_0)‖`, used by `RelResidualTol`.
+- `converged::Bool`, `done::Bool`, `retcode::Symbol`, `resid::T`.
+- `F0_norm::T` — `‖F(x_0)‖`, used by `RelResidualTol`.
 - `t_start::Float64` — wall-clock seconds at solve start (for `MaxTime`).
-- `α_prev::Float64` — previous line-search step size, surfaced to `direction!` via `ctx.α_prev`.
+- `α_prev::T` — previous line-search step size, surfaced to `direction!` via `ctx.α_prev`.
 """
-mutable struct DFProjectionCache{Alg<:DFProjection, F,
+mutable struct DFProjectionCache{T<:AbstractFloat, Alg<:DFProjection, F,
                                   S<:AbstractConstraintSet,
                                   DirState, LSCache, IUpState, StopState}
     alg::Alg
     F::F
     set::S    # resolved at init_cache time from the problem (Stage 6)
 
-    # Common per-iteration state
-    x::Vector{Float64}
-    x_prev::Vector{Float64}
-    w::Vector{Float64}
-    w_prev::Vector{Float64}
-    z::Vector{Float64}
-    d::Vector{Float64}
-    d_prev::Vector{Float64}
-    Fw::Vector{Float64}
-    Fw_prev::Vector{Float64}
-    Fz::Vector{Float64}
-    x_new::Vector{Float64}
-    scratch1::Vector{Float64}
+    # Common per-iteration state — parametric on element type T
+    x::Vector{T}
+    x_prev::Vector{T}
+    w::Vector{T}
+    w_prev::Vector{T}
+    z::Vector{T}
+    d::Vector{T}
+    d_prev::Vector{T}
+    Fw::Vector{T}
+    Fw_prev::Vector{T}
+    Fz::Vector{T}
+    x_new::Vector{T}
+    scratch1::Vector{T}
 
     # Pluggable component state — typed via parameters
     direction_state::DirState
@@ -150,11 +153,11 @@ mutable struct DFProjectionCache{Alg<:DFProjection, F,
     converged::Bool
     done::Bool
     retcode::Symbol
-    resid::Float64
+    resid::T
 
-    F0_norm::Float64
+    F0_norm::T
     t_start::Float64
-    α_prev::Float64
+    α_prev::T
 end
 
 # Custom show — avoids dumping the long parametric type signature.
@@ -180,25 +183,29 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection;
                      set::AbstractConstraintSet = RealSpace())
     n = length(x0)
 
-    x       = Vector{Float64}(undef, n)
-    project!(x, x0, set)                    # ensure feasibility (Stage 6: set from problem)
+    # Derive element type T from x0; fall back to Float64 if x0 has a
+    # non-floating eltype (e.g. Int).
+    T = eltype(x0) <: AbstractFloat ? eltype(x0) : Float64
+
+    x       = Vector{T}(undef, n)
+    project!(x, x0, set)                    # ensures feasibility; converts eltype if needed
 
     x_prev  = copy(x)                       # k=0 doesn't use x_prev
     w       = similar(x)
     w_prev  = copy(x)                       # for k=0 SpectralThreeTerm doesn't use this
     z       = similar(x)
-    d       = zeros(n)
-    d_prev  = zeros(n)
-    Fw      = zeros(n)
-    Fw_prev = zeros(n)
-    Fz      = zeros(n)
+    d       = zeros(T, n)
+    d_prev  = zeros(T, n)
+    Fw      = zeros(T, n)
+    Fw_prev = zeros(T, n)
+    Fz      = zeros(T, n)
     x_new   = similar(x)
     scratch1 = similar(x)
 
     # One initial F-eval (needed for F0_norm and as the `fu` argument to
     # CommonSolve.init for the line search).
     Fx0 = F(x)
-    s = 0.0
+    s = zero(T)
     @inbounds for i in eachindex(Fx0)
         s += Fx0[i] * Fx0[i]
     end
@@ -208,10 +215,11 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection;
     # are `nothing` for components that don't need scratch
     # (SpectralThreeTerm, DirectUpdate, most stopping criteria);
     # SolodovSvaiterProjection allocates its Dykstra buffers; HalpernUpdate
-    # stores x_0.
-    dir_state            = init_state(alg.direction,      nothing, x0, alg)
-    iterate_update_state = init_state(alg.iterate_update, nothing, x0, alg)
-    stopping_state       = init_state(alg.stopping,       nothing, x0, alg)
+    # stores x_0. Pass `x` (projected, T-typed) rather than `x0` so the
+    # state buffers align with the cache's element type.
+    dir_state            = init_state(alg.direction,      nothing, x, alg)
+    iterate_update_state = init_state(alg.iterate_update, nothing, x, alg)
+    stopping_state       = init_state(alg.stopping,       nothing, x, alg)
 
     # Line-search cache via LineSearch.jl's CommonSolve.init contract.
     # Synthesize a NonlinearProblem from the F closure (test-friendly path).
@@ -231,10 +239,10 @@ function init_cache(F, x0::AbstractVector, alg::DFProjection;
         false,     # converged
         false,     # done
         :Default,  # retcode
-        NaN,       # resid
+        T(NaN),    # resid
         F0_norm,
-        time(),    # t_start
-        1.0,       # α_prev (ignored at k=0; first line search overwrites)
+        time(),    # t_start (stays Float64 — wall-clock seconds)
+        one(T),    # α_prev (ignored at k=0; first line search overwrites)
     )
 
     # Fire :initialize event before returning the cache.
@@ -273,7 +281,7 @@ end
 end
 
 @inline function _norm2(v::AbstractVector)
-    s = 0.0
+    s = zero(eltype(v))
     @inbounds for i in eachindex(v)
         s += v[i] * v[i]
     end
@@ -284,7 +292,7 @@ end
 function _is_feasible(x::AbstractVector, set::AbstractConstraintSet,
                       scratch::AbstractVector; tol::Float64 = 1e-10)
     project!(scratch, x, set)
-    diff_sq = 0.0
+    diff_sq = zero(eltype(x))
     @inbounds for i in eachindex(x)
         diff_sq += abs2(scratch[i] - x[i])
     end
@@ -336,13 +344,14 @@ function step!(cache::DFProjectionCache)
 
     # ── Step 3: search direction d_k ──────────────────────────────────────────
     ctx = (;
-        Fw      = cache.Fw,
-        Fw_prev = cache.Fw_prev,
-        w       = cache.w,
-        w_prev  = cache.w_prev,
-        d_prev  = cache.d_prev,
-        k       = k,
-        α_prev  = cache.α_prev,
+        Fw              = cache.Fw,
+        Fw_prev         = cache.Fw_prev,
+        w               = cache.w,
+        w_prev          = cache.w_prev,
+        d_prev          = cache.d_prev,
+        k               = k,
+        α_prev          = cache.α_prev,
+        direction_state = cache.direction_state,
     )
     direction!(cache.d, alg.direction, ctx)
 
@@ -390,7 +399,7 @@ function step!(cache::DFProjectionCache)
     # Without an explicit convergence tolerance pinned to this case, we have
     # no λ_k to project — declare a degenerate residual.
     Fz_norm = _norm2(cache.Fz)
-    if Fz_norm < eps()
+    if Fz_norm < eps(typeof(Fz_norm))
         cache.resid   = Fz_norm
         cache.retcode = :DegenerateResidual
         cache.done    = true

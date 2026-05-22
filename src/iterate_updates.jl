@@ -39,25 +39,25 @@ struct SolodovSvaiterProjection <: AbstractIterateUpdate end
 Per-solve state for `SolodovSvaiterProjection`. Holds the projection
 target buffer and Dykstra's four inner buffers.
 """
-struct SolodovSvaiterState
-    proj_target::Vector{Float64}
-    proj_p::Vector{Float64}
-    proj_q::Vector{Float64}
-    proj_scratch::Vector{Float64}
-    proj_out_prev::Vector{Float64}
+struct SolodovSvaiterState{T<:AbstractFloat}
+    proj_target::Vector{T}
+    proj_p::Vector{T}
+    proj_q::Vector{T}
+    proj_scratch::Vector{T}
+    proj_out_prev::Vector{T}
 end
 
-function SolodovSvaiterState(n::Int)
-    SolodovSvaiterState(
-        Vector{Float64}(undef, n),
-        zeros(n), zeros(n),
-        Vector{Float64}(undef, n),
-        Vector{Float64}(undef, n),
+function SolodovSvaiterState{T}(n::Int) where T<:AbstractFloat
+    SolodovSvaiterState{T}(
+        Vector{T}(undef, n),
+        zeros(T, n), zeros(T, n),
+        Vector{T}(undef, n),
+        Vector{T}(undef, n),
     )
 end
 
-init_state(::SolodovSvaiterProjection, prob, x0, alg) =
-    SolodovSvaiterState(length(x0))
+init_state(::SolodovSvaiterProjection, prob, x, alg) =
+    SolodovSvaiterState{eltype(x)}(length(x))
 
 function update_iterate!(x_new::AbstractVector,
                           ::SolodovSvaiterProjection, ctx)
@@ -67,11 +67,12 @@ function update_iterate!(x_new::AbstractVector,
     ζ            = ctx.ζ
     inner_maxiter = ctx.inner_maxiter
     state        = ctx.state
+    T            = eltype(w)
 
     # Compute λ_k = F(z)' (w − z) / ‖F(z)‖² and ‖F(z)‖²
-    inner_wz   = 0.0
-    inner_Fz_z = 0.0
-    Fz_norm_sq = 0.0
+    inner_wz   = zero(T)
+    inner_Fz_z = zero(T)
+    Fz_norm_sq = zero(T)
     @inbounds for i in eachindex(w)
         inner_wz   += Fz[i] * (w[i] - z[i])
         inner_Fz_z += Fz[i] * z[i]
@@ -84,8 +85,8 @@ function update_iterate!(x_new::AbstractVector,
         state.proj_target[i] = w[i] - λ * Fz[i]
     end
 
-    # ε_k = (ζ²/2) ‖λ F(z)‖²
-    ε_k = 0.5 * ζ^2 * λ * λ * Fz_norm_sq
+    # ε_k = (ζ²/2) ‖λ F(z)‖². ζ is Float64 (algorithm parameter); coerce to T.
+    ε_k = T(0.5) * T(ζ)^2 * λ * λ * Fz_norm_sq
 
     # Project onto X ∩ H_k
     approx_project_X_halfspace!(x_new, state.proj_target,
@@ -155,26 +156,31 @@ Per-solve state for `HalpernUpdate`: holds a copy of the initial
 feasible iterate `x_0` and a scratch buffer for the pre-projection
 combination `β·x_0 + (1-β)·z_k`.
 """
-struct HalpernState
-    x0::Vector{Float64}
-    combination_buf::Vector{Float64}
+struct HalpernState{T<:AbstractFloat}
+    x0::Vector{T}
+    combination_buf::Vector{T}
 end
 
-function init_state(rule::HalpernUpdate, prob, x0, alg)
-    # x0 is already projected onto the resolved set by init_cache; copy here.
-    x0_copy = copy(collect(Float64, x0))
-    return HalpernState(x0_copy, Vector{Float64}(undef, length(x0_copy)))
+function init_state(rule::HalpernUpdate, prob, x, alg)
+    # x is already projected onto the resolved set by init_cache; copy
+    # here, preserving its element type T (closes a v0.1.0 latent bug
+    # where x was force-coerced to Float64).
+    T = eltype(x)
+    return HalpernState{T}(copy(x), Vector{T}(undef, length(x)))
 end
 
 @inline _halpern_β(β::Number, k) = Float64(β)
 @inline _halpern_β(β,        k) = Float64(β(k))
 
 function update_iterate!(x_new::AbstractVector, rule::HalpernUpdate, ctx)
-    β     = _halpern_β(rule.β, ctx.k)
     state = ctx.state
     buf   = state.combination_buf
+    T     = eltype(buf)
+    # _halpern_β returns Float64 (Approach A boundary, same pattern as
+    # inertial_coef); coerce to T here for type-stable inner loop.
+    β     = T(_halpern_β(rule.β, ctx.k))
     @inbounds @simd for i in eachindex(buf)
-        buf[i] = β * state.x0[i] + (1.0 - β) * ctx.z[i]
+        buf[i] = β * state.x0[i] + (one(T) - β) * ctx.z[i]
     end
     project!(x_new, buf, ctx.set)
     return x_new
