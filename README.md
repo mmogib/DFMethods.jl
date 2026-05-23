@@ -1,5 +1,6 @@
 # DFMethods
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20350220.svg)](https://doi.org/10.5281/zenodo.20350220)
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mmogib.github.io/DFMethods.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mmogib.github.io/DFMethods.jl/dev/)
 [![Build Status](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml?query=branch%3Amain)
@@ -34,7 +35,22 @@ Full documentation: <https://mmogib.github.io/DFMethods.jl/stable/>.
 
 ## Citation
 
-The current release's citation metadata is in [`CITATION.cff`](CITATION.cff) — GitHub's *Cite this repository* button reads this file. A formal `@software{}` BibTeX block with the Zenodo DOI is added after each tagged release; see the [GitHub Releases page](https://github.com/mmogib/DFMethods.jl/releases).
+If you use DFMethods.jl in research, please cite it via the Zenodo DOI:
+
+```bibtex
+@software{Alshahrani_DFMethods_2026,
+  author    = {Alshahrani, Mohammed},
+  title     = {{DFMethods.jl: A configurable framework for derivative-free projection methods for constrained nonlinear equations}},
+  month     = may,
+  year      = 2026,
+  publisher = {Zenodo},
+  version   = {v0.3.0},
+  doi       = {10.5281/zenodo.20350220},
+  url       = {https://doi.org/10.5281/zenodo.20350220}
+}
+```
+
+The machine-readable equivalent is in [`CITATION.cff`](CITATION.cff) — GitHub's *Cite this repository* button uses this file. Each tagged release also has a version-specific Zenodo DOI; see the [GitHub Releases page](https://github.com/mmogib/DFMethods.jl/releases) or the [Zenodo record](https://doi.org/10.5281/zenodo.20350220).
 
 If you build on a specific algorithmic component, please additionally cite the originating source — each component's docstring names it with a DOI link.
 
