@@ -21,6 +21,7 @@ makedocs(;
     pages=[
         "Home"            => "index.md",
         "Quickstart"      => "quickstart.md",
+        "Tutorial"        => "tutorial.md",
         "Algorithm"       => "algorithm.md",
         "Constraint Sets" => "constraints.md",
         "Extending"       => "extending.md",

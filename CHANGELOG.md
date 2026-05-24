@@ -5,6 +5,51 @@ All notable changes to **DFMethods.jl** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-05-24
+
+Documentation enhancement release. Adds a new **Tutorial** page to the
+manual (between Quickstart and Algorithm in the nav) demonstrating the
+end-to-end solver workflow with emphasis on the callback architecture
+(observer callbacks, stopping criteria as callbacks, writing a custom
+callback from scratch). No source-code changes; no API additions or
+removals; 242/242 tests pass unchanged.
+
+### Added
+
+- **`docs/src/tutorial.md`** — hands-on walkthrough (live-evaluated via
+  Documenter `@example` blocks):
+  - § 1 Setup — minimum-viable `solve(NonlinearProblem(F, x0), DFProjection())`
+  - § 2 Choosing components — overrides for `linesearch`, `inertial`, etc.
+  - § 3 Built-in observer callbacks — `LoggingCallback` (per-iter table) +
+    `HistoryCallback` (collect data, plot inline convergence curve via
+    Plots.jl)
+  - § 4 Stopping criteria as callbacks — `AnyOf(AbsResidualTol, MaxIters,
+    MaxTime)` composition; documents the `AbstractStoppingCriterion <:
+    AbstractCallback` design
+  - § 5 Writing a custom callback — `IterateSnapshotCallback` from scratch
+    showing the `on_event!(cb, cache, event::Symbol)` contract and the
+    `:initialize` / `:post_linesearch` / `:post_iter` / `:terminate` event
+    order
+  - § 6 Comparative sweep — small 3-problem × 3-line-search loop with
+    results aggregated into a `DataFrame` and rendered inline
+
+### Changed
+
+- **`docs/Project.toml`**: added `Plots`, `DataFrames`, `LinearAlgebra` —
+  needed by the new tutorial's `@example` blocks (rendered convergence
+  plot in § 3, results table in § 6).
+- **`docs/make.jl`**: added `"Tutorial" => "tutorial.md"` to the `pages`
+  list, slotted between Quickstart and Algorithm.
+
+### Compatibility
+
+- Julia ≥ 1.10
+- `SciMLBase` v2.x
+- `CommonSolve` v0.2.x
+- `LineSearch` v0.1.x
+
+No source-level changes — drop-in upgrade from v0.3.0.
+
 ## [0.3.0] — 2026-05-22
 
 Element-type genericity, direction-state ctx surfacing, documentation
@@ -280,6 +325,7 @@ for constrained nonlinear equations $F(x) = 0$ on a closed convex set $X$.
 - `SciMLBase` v2.x
 - `CommonSolve` v0.2.x
 
+[0.3.1]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.1
 [0.3.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.0
 [0.2.1]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.2.0
