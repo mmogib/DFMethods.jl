@@ -44,7 +44,7 @@ If you use DFMethods.jl in research, please cite it via the Zenodo DOI:
   month     = may,
   year      = 2026,
   publisher = {Zenodo},
-  version   = {v0.3.0},
+  version   = {v0.3.1},
   doi       = {10.5281/zenodo.20350220},
   url       = {https://doi.org/10.5281/zenodo.20350220}
 }
