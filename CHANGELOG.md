@@ -5,6 +5,41 @@ All notable changes to **DFMethods.jl** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`SpectralThreeTerm`**: two new keyword arguments `alpha_min` and
+  `alpha_max` (defaults `1e-10` and `1e30`) that clamp the spectral
+  coefficient ``ϑ_k^I`` to the interval `[alpha_min, alpha_max]`.
+  The clamp underwrites the strict-descent property
+  ``F(w_k)' d_k ≤ -\alpha_{\min} \|F(w_k)\|^2`` and the trust-region
+  bound ``\|d_k\| ≤ (α_{\max} + 2/\bar α_1)\,\|F(w_k)\|``. In the
+  degenerate case `y_{k-1} = 0` (which forced `ϑ_k^I = 0` previously,
+  giving zero descent), ``ϑ_k^I`` now falls back to `alpha_min`.
+- **`SolodovSvaiterProjection`**: new keyword argument `γ::Float64 =
+  1.0` (relaxation factor; must lie in `(0, 2)`). The projection
+  target becomes `w − γ·λ_k·F(z_k)`, and the Dykstra tolerance scales
+  to `ε_k = (ζ²/2) γ² λ_k² ‖F(z_k)‖²` so Dykstra stops at a constant
+  fractional accuracy of the projection step across all `γ` values.
+  `γ = 1` preserves the prior release behavior byte-for-byte. For
+  `X = RealSpace` the halfspace projection cancels `γ ≤ 1`; the
+  relaxation has effect for `γ > 1` and for non-trivial constraint
+  sets.
+
+### Changed
+
+- **`SpectralThreeTerm.direction!`**: the assembled spectral
+  coefficient is now `clamp(s'y / y'y, alpha_min, alpha_max)` rather
+  than the unconstrained `s'y / y'y`. Default knobs are wide enough
+  (`[1e-10, 1e30]`) that any well-behaved trajectory produces a
+  bit-identical direction to the prior release; only the degenerate
+  fallback (`y_{k-1} = 0`) changes output, replacing the previous
+  zero-descent failure with a strict-descent step.
+- **`SolodovSvaiterProjection`** is now `Base.@kwdef`'d with a single
+  `γ::Float64 = 1.0` field. The zero-argument `SolodovSvaiterProjection()`
+  constructor continues to work and constructs the default rule.
+
 ## [0.3.1] — 2026-05-24
 
 Documentation enhancement release. Adds a new **Tutorial** page to the
