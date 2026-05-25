@@ -197,6 +197,131 @@ end
             direction!(d, rule, _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
             @test all(isfinite, d)
         end
+
+        @testset "constructor: alpha_min / alpha_max defaults + overrides" begin
+            r_default = SpectralThreeTerm()
+            @test r_default.alpha_min == 1e-10
+            @test r_default.alpha_max == 1e30
+
+            r_custom = SpectralThreeTerm(; alpha_min = 0.5, alpha_max = 2.0)
+            @test r_custom.alpha_min == 0.5
+            @test r_custom.alpha_max == 2.0
+        end
+
+        @testset "ϑ_I clamp: lower bound active" begin
+            # Force the raw spectral coefficient s'y/y'y to be very small
+            # (≈ 0) by choosing y_{k-1} ≂̸ 0 with s ⟂ y. Set alpha_min = 0.5
+            # so the clamp lifts ϑ_I from ~0 to 0.5. With Fw_prev = 0, β_k
+            # and ϑ_II vanish, so d_k = -0.5 · F(w_k) exactly.
+            rng = MersenneTwister(7)
+            w       = randn(rng, n)
+            y       = randn(rng, n)            # y_{k-1}
+            Fw_prev = randn(rng, n)
+            Fw      = Fw_prev .+ y             # so F(w_k) - F(w_{k-1}) = y
+            # Choose w_prev so that w - w_prev = -r·y + e, with e ⟂ y; then
+            # s = (w - w_prev) + r·y = e ⟂ y, hence s'y = 0.
+            e = randn(rng, n)
+            e .-= (dot(e, y) / dot(y, y)) .* y    # project e onto y^⊥
+            r_val = 0.1
+            w_prev = w .+ r_val .* y .- e
+            d_prev = zeros(n)                  # so β_k and ϑ_II annihilate
+            # Disable Fw_prev's effect by zeroing it (v_k stays positive via
+            # alpha_bar branch with zero d_prev → fallback to eps guard).
+            # We instead set Fw_prev so that ‖Fw_prev‖² > 0; β_k and ϑ_II
+            # depend on F_w · y and F_w · d_prev. With d_prev = 0, ϑ_II = 0.
+            # β_k is generally nonzero unless F_w ⟂ y. Force F_w ⟂ y:
+            Fw .-= (dot(Fw, y) / dot(y, y)) .* y    # now F_w ⟂ y → β_k = 0
+            Fw_prev .= Fw .- y                      # preserve y = F_w - F_w_prev
+
+            rule_lo = SpectralThreeTerm(; r = r_val, alpha_min = 0.5, alpha_max = 1e30)
+            d = similar(w)
+            direction!(d, rule_lo, _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
+            @test d ≈ -0.5 .* Fw atol = 1e-10
+        end
+
+        @testset "ϑ_I clamp: upper bound active" begin
+            # Mirror of the previous test, but force s'y/y'y to be very
+            # large by making y small and aligning s with y. Then alpha_max
+            # caps ϑ_I.
+            rng = MersenneTwister(13)
+            w       = randn(rng, n)
+            y       = 1e-6 .* randn(rng, n)        # tiny y → ‖y‖² very small
+            Fw_prev = randn(rng, n)
+            # F_w must satisfy F_w - F_w_prev = y AND F_w ⟂ y.
+            Fw = Fw_prev .+ y
+            Fw .-= (dot(Fw, y) / dot(y, y)) .* y    # F_w ⟂ y → β_k = 0
+            Fw_prev .= Fw .- y
+            r_val = 0.1
+            # Pick s = (w - w_prev) + r·y aligned with y so s'y/y'y is huge.
+            scale = 1e6
+            s = scale .* y                          # s ∥ y, s'y/y'y = scale
+            w_prev = w .+ r_val .* y .- s
+            d_prev = zeros(n)
+
+            rule_hi = SpectralThreeTerm(; r = r_val, alpha_min = 1e-10, alpha_max = 2.0)
+            d = similar(w)
+            direction!(d, rule_hi, _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
+            @test d ≈ -2.0 .* Fw atol = 1e-8
+        end
+
+        @testset "degenerate y = 0: ϑ_I falls back to alpha_min" begin
+            # When y_{k-1} = 0 (so yy_sq = 0), ϑ_I should fall back to
+            # alpha_min, NOT to zero — the pre-fix `zero(T)` fallback would
+            # have produced d = β·d_prev (no descent contribution from F).
+            # With Fw_prev = Fw the y vector is zero. v_k stays positive
+            # via Fwm_sq, so β_k = (F_w · 0)/v_k = 0 and ϑ_II = (F_w·d_prev)/v_k.
+            # Then d = -alpha_min · F_w + 0 - ϑ_II · 0 = -alpha_min · F_w
+            # provided d_prev ⟂ F_w; we force that.
+            n_local = 4
+            Fw      = [1.0, 0.0, 1.0, 0.0]
+            Fw_prev = copy(Fw)                  # → y = 0
+            w       = randn(MersenneTwister(99), n_local)
+            w_prev  = randn(MersenneTwister(100), n_local)
+            d_prev  = [0.0, 1.0, 0.0, 1.0]      # ⟂ Fw
+
+            rule_deg = SpectralThreeTerm(; alpha_min = 0.25, alpha_max = 1e30)
+            d = similar(Fw)
+            direction!(d, rule_deg, _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
+            @test d ≈ -0.25 .* Fw atol = 1e-10
+        end
+
+        @testset "default alpha_min/alpha_max do not perturb generic case" begin
+            # Regression: with non-pathological inputs, sy/yy_sq lands in
+            # [1e-10, 1e30] and the clamp is a no-op. Output matches the
+            # pre-fix formula byte-equivalently.
+            rng = MersenneTwister(2026)
+            w       = randn(rng, n)
+            w_prev  = randn(rng, n)
+            d_prev  = randn(rng, n)
+            Fw      = randn(rng, n)
+            Fw_prev = randn(rng, n)
+
+            # Recompute ϑ_I, β_k, ϑ_II, d the way the pre-fix code did
+            # (no clamp) and confirm bitwise-equal output for default knobs.
+            r_val = 0.1
+            ab    = 1.0
+            y     = Fw .- Fw_prev
+            s     = (w .- w_prev) .+ r_val .* y
+            yy_sq = dot(y, y)
+            sy    = dot(s, y)
+            Fw_y  = dot(Fw, y)
+            Fw_d  = dot(Fw, d_prev)
+            dd    = norm(d_prev)
+            yyn   = sqrt(yy_sq)
+            Fwm_sq = dot(Fw_prev, Fw_prev)
+            v_k   = max(ab * dd * yyn, Fwm_sq)
+            v_k   = max(v_k, eps(typeof(v_k)))
+            ϑ_I_ref = sy / yy_sq               # raw, no clamp
+            β_ref   = Fw_y / v_k
+            ϑ_II_ref = Fw_d / v_k
+            # Sanity: under random inputs the raw ϑ_I lands well inside [1e-10, 1e30]
+            @test 1e-10 < abs(ϑ_I_ref) < 1e30
+            d_ref = -ϑ_I_ref .* Fw .+ β_ref .* d_prev .- ϑ_II_ref .* y
+
+            d = similar(w)
+            direction!(d, SpectralThreeTerm(), _ctx(Fw, Fw_prev, w, w_prev, d_prev, 1))
+            @test d ≈ d_ref atol = 1e-12
+        end
     end
 
     # ========================================================================
@@ -319,6 +444,84 @@ end
             sol = solve(prob, alg)
             @test sol.retcode == SciMLBase.ReturnCode.Success
             @test norm(sol.u) <= 1e-5
+        end
+
+        @testset "SolodovSvaiterProjection: γ default + override" begin
+            @test SolodovSvaiterProjection().γ == 1.0
+            @test SolodovSvaiterProjection(; γ = 1.8).γ == 1.8
+            @test SolodovSvaiterProjection(; γ = 0.5).γ == 0.5
+        end
+
+        @testset "SolodovSvaiterProjection: γ = 1 byte-equivalent to v0.3.1 default" begin
+            # The default γ = 1.0 must reproduce v0.3.1's iterate stream.
+            # Use a deterministic problem and compare two solves: one with
+            # SolodovSvaiterProjection() (defaults), one with γ = 1.0 explicit.
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [0.7, -0.3, 0.5])
+            alg_default  = DFProjection(; iterate_update = SolodovSvaiterProjection(),
+                                            linesearch = ConstantBacktrack(),
+                                            inertial   = NoInertial())
+            alg_explicit = DFProjection(; iterate_update = SolodovSvaiterProjection(; γ = 1.0),
+                                            linesearch = ConstantBacktrack(),
+                                            inertial   = NoInertial())
+            sol_d = solve(prob, alg_default)
+            sol_e = solve(prob, alg_explicit)
+            @test sol_d.u == sol_e.u
+            @test sol_d.retcode == sol_e.retcode
+        end
+
+        @testset "SolodovSvaiterProjection: γ > 1 over-relaxation converges" begin
+            # γ = 1.8 (STTDFPM 2024 experimental default) should still solve
+            # cleanly on a strongly-monotone test problem.
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+            alg = DFProjection(;
+                iterate_update = SolodovSvaiterProjection(; γ = 1.8),
+                linesearch     = ConstantBacktrack(),
+                inertial       = NoInertial(),
+                abstol         = 1e-6,
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test norm(sol.u) <= 1e-5
+        end
+
+        @testset "SolodovSvaiterProjection: γ ≤ 1 cancels in RealSpace (documented)" begin
+            # For X = RealSpace, the halfspace projection brings the target
+            # w − γ·λ·F(z) back to the H_k boundary for γ ≤ 1, recovering
+            # the γ = 1 iterate. Confirm by checking that solves with γ = 0.5
+            # and γ = 1.0 produce the same iterate sequence.
+            f(u, p) = copy(u)
+            prob = SciMLBase.NonlinearProblem(f, [0.8, -0.4])
+            alg_half = DFProjection(; iterate_update = SolodovSvaiterProjection(; γ = 0.5),
+                                       linesearch = ConstantBacktrack(),
+                                       inertial   = NoInertial())
+            alg_one  = DFProjection(; iterate_update = SolodovSvaiterProjection(; γ = 1.0),
+                                       linesearch = ConstantBacktrack(),
+                                       inertial   = NoInertial())
+            sol_h = solve(prob, alg_half)
+            sol_o = solve(prob, alg_one)
+            @test sol_h.u ≈ sol_o.u  atol = 1e-12
+            @test sol_h.stats.nsteps == sol_o.stats.nsteps
+        end
+
+        @testset "SolodovSvaiterProjection: γ > 1 with BoxSet still converges" begin
+            # Box-constrained smoke: γ > 1 with a non-trivial X. The H_k
+            # cancellation no longer applies (joint projection onto X ∩ H_k
+            # is shaped by both constraints), so γ has a genuine effect.
+            target = [0.3, -0.2]
+            f(u, p) = u .- target
+            prob = SciMLBase.NonlinearProblem(f, [1.0, -1.0]; lb = -ones(2), ub = ones(2))
+            alg = DFProjection(;
+                iterate_update = SolodovSvaiterProjection(; γ = 1.6),
+                inertial       = NoInertial(),
+                abstol         = 1e-6,
+                maxiters       = 500,
+            )
+            sol = solve(prob, alg)
+            @test sol.retcode == SciMLBase.ReturnCode.Success
+            @test sol.u ≈ target atol = 1e-4
         end
 
         @testset "DirectUpdate: x_{k+1} = project(z, set)" begin

@@ -54,7 +54,7 @@ init_state(::AbstractSearchDirection, prob, x, alg) = nothing
 # ============================================================================
 
 """
-    SpectralThreeTerm(; r=0.1, alpha_bar=1.0)
+    SpectralThreeTerm(; r=0.1, alpha_bar=1.0, alpha_min=1e-10, alpha_max=1e30)
 
 Spectral three-term derivative-free direction. The formula is:
 
@@ -68,23 +68,34 @@ with
 ```
 y_{k-1} = F(w_k) - F(w_{k-1})
 s_{k-1} = (w_k - w_{k-1}) + r · y_{k-1}
-ϑ_k^I   = (s_{k-1}' y_{k-1}) / (y_{k-1}' y_{k-1})
+ϑ_k^I   = clamp((s_{k-1}' y_{k-1}) / (y_{k-1}' y_{k-1}), alpha_min, alpha_max)
 v_k     = max(alpha_bar · ‖d_{k-1}‖ · ‖y_{k-1}‖, ‖F(w_{k-1})‖²)
 β_k     = (F(w_k)' y_{k-1}) / v_k
 ϑ_k^II  = (F(w_k)' d_{k-1}) / v_k
 ```
 
-Satisfies the sufficient-descent and boundedness properties used in
-the convergence proofs for this class of algorithms.
+In the degenerate case `y_{k-1} = 0`, ``ϑ_k^I`` falls back to
+`alpha_min`, preserving the strict-descent property ``F(w_k)' d_k ≤
+-\\alpha_{\\min} \\, \\|F(w_k)\\|^2``.
+
+The uniform bound `alpha_min ≤ ϑ_k^I ≤ alpha_max` is what
+underwrites the sufficient-descent and trust-region properties of
+this class of algorithms.
 
 # Parameters
 - `r`: spectral parameter in the definition of `s_{k-1}` (default 0.1).
 - `alpha_bar`: the parameter ``\\bar{α}_1`` in the definition of `v_k`
   (default 1.0).
+- `alpha_min`: lower clamp on the spectral coefficient ``ϑ_k^I``
+  (default `1e-10`); also the degenerate-case fallback.
+- `alpha_max`: upper clamp on the spectral coefficient ``ϑ_k^I``
+  (default `1e30`).
 """
 Base.@kwdef struct SpectralThreeTerm <: AbstractSearchDirection
     r::Float64         = 0.1
     alpha_bar::Float64 = 1.0
+    alpha_min::Float64 = 1e-10
+    alpha_max::Float64 = 1e30
 end
 
 """
@@ -138,7 +149,10 @@ function direction!(d::AbstractVector, rule::SpectralThreeTerm, ctx)
     v_k = max(T(rule.alpha_bar) * dd_norm * yy_norm, Fwm_sq)
     v_k = max(v_k, eps(typeof(v_k)))   # guard against v_k = 0
 
-    ϑ_I  = yy_sq > 0 ? sy / yy_sq : zero(T)
+    α_min_T = T(rule.alpha_min)
+    α_max_T = T(rule.alpha_max)
+    ϑ_I_raw = yy_sq > 0 ? sy / yy_sq : α_min_T
+    ϑ_I     = clamp(ϑ_I_raw, α_min_T, α_max_T)
     β_k  = Fw_y / v_k
     ϑ_II = Fw_d / v_k
 

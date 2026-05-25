@@ -22,16 +22,44 @@ init_state(::AbstractIterateUpdate, prob, x0, alg) = nothing
 # ============================================================================
 
 """
-    SolodovSvaiterProjection()
+    SolodovSvaiterProjection(; γ = 1.0)
 
 Default iterate-update strategy. Implements the hyperplane projection
 scheme of Solodov & Svaiter (1999): given the trial point `z` with
 residual `F(z)`, construct the separating hyperplane
 `H_k = {x : F(z)' (x − z) ≤ 0}` and project the target
-`w − λ_k F(z)` onto `X ∩ H_k` to tolerance
-`ε_k = (ζ²/2) ‖λ_k F(z)‖²`.
+`w − γ·λ_k F(z)` onto `X ∩ H_k` to tolerance
+`ε_k = (ζ²/2) ‖γ·λ_k F(z)‖² = (ζ²/2) γ² λ_k² ‖F(z)‖²`.
+
+The 1999 scheme assumes exact projection onto `X ∩ H_k`. DFMethods
+realizes it through the inexact-projection refinement standard in the
+broader Solodov–Svaiter inexact-projection lineage: a Dykstra inner
+loop terminated at the tolerance `ε_k` above (driven by `approx_project_X_halfspace!`).
+For `X = RealSpace` the inner solver collapses to a single exact
+halfspace projection regardless of `ε_k`.
+
+The relaxation factor `γ ∈ (0, 2)` controls the step length past the
+separating hyperplane. The convergence bound for this family carries a
+factor of `γ(2 − γ)` (maximized at `γ = 1`); some derivative-free
+projection methods set `γ` larger (e.g. `1.6`–`1.8`) to trade theoretical
+contraction for empirical speed on test problems.
+
+# Parameters
+- `γ::Float64 = 1.0`: relaxation factor; must lie in `(0, 2)`.
+
+# Caveat on under-relaxation (γ < 1)
+For `X = RealSpace` the target `w − γ·λ·F(z)` with `γ < 1` lies on the
+strict-violation side of `H_k`; the exact halfspace projection then
+brings it back to the boundary, recovering the `γ = 1` iterate. In
+short, **`γ ≤ 1` cancels in `RealSpace`**. The relaxation has effect for
+`γ > 1` (target sits inside `H_k`, projection no-op) and for non-trivial
+`X` (joint projection onto `X ∩ H_k` is shaped by both constraints). The
+`ε_k` tolerance is scaled by `γ²` so Dykstra stops to a constant
+fractional accuracy of the projection step regardless of `γ`.
 """
-struct SolodovSvaiterProjection <: AbstractIterateUpdate end
+Base.@kwdef struct SolodovSvaiterProjection <: AbstractIterateUpdate
+    γ::Float64 = 1.0
+end
 
 """
     SolodovSvaiterState
@@ -60,7 +88,7 @@ init_state(::SolodovSvaiterProjection, prob, x, alg) =
     SolodovSvaiterState{eltype(x)}(length(x))
 
 function update_iterate!(x_new::AbstractVector,
-                          ::SolodovSvaiterProjection, ctx)
+                          rule::SolodovSvaiterProjection, ctx)
     w, d, z      = ctx.w, ctx.d, ctx.z
     Fz           = ctx.Fz
     set          = ctx.set
@@ -68,6 +96,7 @@ function update_iterate!(x_new::AbstractVector,
     inner_maxiter = ctx.inner_maxiter
     state        = ctx.state
     T            = eltype(w)
+    γ            = T(rule.γ)
 
     # Compute λ_k = F(z)' (w − z) / ‖F(z)‖² and ‖F(z)‖²
     inner_wz   = zero(T)
@@ -80,13 +109,15 @@ function update_iterate!(x_new::AbstractVector,
     end
     λ = inner_wz / Fz_norm_sq
 
-    # target = w - λ·F(z)
+    # target = w - γ·λ·F(z)
     @inbounds @simd for i in eachindex(w)
-        state.proj_target[i] = w[i] - λ * Fz[i]
+        state.proj_target[i] = w[i] - γ * λ * Fz[i]
     end
 
-    # ε_k = (ζ²/2) ‖λ F(z)‖². ζ is Float64 (algorithm parameter); coerce to T.
-    ε_k = T(0.5) * T(ζ)^2 * λ * λ * Fz_norm_sq
+    # ε_k = (ζ²/2) ‖γ·λ F(z)‖² = (ζ²/2) γ² λ² ‖F(z)‖²
+    # — scales with the actual projection-step magnitude so Dykstra
+    # stops to a constant fractional accuracy across γ.
+    ε_k = T(0.5) * γ * γ * T(ζ)^2 * λ * λ * Fz_norm_sq
 
     # Project onto X ∩ H_k
     approx_project_X_halfspace!(x_new, state.proj_target,

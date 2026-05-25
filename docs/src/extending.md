@@ -17,7 +17,7 @@ Each subsection points to a runnable file in `examples/` that
 demonstrates a custom subtype end-to-end. Copy one of those files as a
 template for your own extension.
 
-## 0. Contract surface: `ctx`, `cache`, and per-solve state
+## Preliminaries: contract surface (`ctx`, `cache`, per-solve state)
 
 DFMethods's seven extension points use three different conventions for
 passing per-iteration state to user code. This section is the canonical
@@ -252,6 +252,25 @@ implements one method:
 DFMethods.direction!(d::AbstractVector, rule::MyDirection, ctx) -> d
 ```
 
+### Convergence contract
+
+Custom directions must produce $d_k$ satisfying two bounds, which DFMethods
+does **not** check at runtime — they are the rule author's responsibility:
+
+- **Sufficient descent**: $-F(w_k)^\top d_k \ge c\, \|F(w_k)\|^2$ for some
+  constant $c > 0$ independent of $k$.
+- **Bounded growth**: $\|d_k\| \le \bar c\, \|F(w_k)\|$ for some constant
+  $\bar c > 0$ independent of $k$.
+
+The built-in [`SpectralThreeTerm`](@ref) satisfies both: the
+$[\alpha_{\min}, \alpha_{\max}]$ clamp on its spectral coefficient
+$\vartheta_k^I$ gives $-F(w_k)^\top d_k = \vartheta_k^I \|F(w_k)\|^2 \ge
+\alpha_{\min} \|F(w_k)\|^2$, and the $v_k$ denominator together with the
+same clamp yields $\|d_k\| \le (\alpha_{\max} + 2/\bar\alpha_1)\|F(w_k)\|$.
+Violating either bound forfeits the convergence guarantee (see §8).
+
+### `direction!` `ctx`
+
 The context `ctx` is a `NamedTuple` carrying the per-iteration inputs:
 
 | Field                  | Description                                                  |
@@ -290,10 +309,8 @@ function DFMethods.direction!(d, rule::AbubakarNHSCG, ctx)
 end
 ```
 
-Convergence requires the rule to produce a direction with sufficient
-descent ($-F(w)^\top d \geq c\|F(w)\|^2$) and bounded norm
-($\|d\| \leq \bar c\|F(w)\|$). See §8 for the consequences of relaxing
-either property.
+(The convergence contract for `d_k` is stated at the top of this section.
+See §8 for the consequences of violating it.)
 
 ## 3. Iterate update
 
@@ -305,8 +322,8 @@ DFMethods.update_iterate!(x_new::AbstractVector, rule::MyUpdate, ctx) -> x_new
 ```
 
 The `ctx` NamedTuple here has 11 fields (`w`, `d`, `α`, `z`, `Fw`, `Fz`,
-`set`, `k`, `ζ`, `inner_maxiter`, `state`); see §0 for the full table
-and the per-iteration ordering.
+`set`, `k`, `ζ`, `inner_maxiter`, `state`); see *Preliminaries* above for
+the full table and the per-iteration ordering.
 
 Three built-in strategies ship:
 
@@ -323,6 +340,32 @@ constant $\beta$ and a callable schedule $k \mapsto \beta(k)$ such as
 $\beta(k) = 1/(k+2)$ for the classical
 [Halpern (1967)](https://doi.org/10.1090/S0002-9904-1967-11864-0)
 iteration.
+
+### Implicit contract for `SolodovSvaiterProjection`
+
+The hyperplane-projection update relies on the multiplier
+
+```math
+\lambda_k \;=\; \frac{F(z_k)^\top (w_k - z_k)}{\|F(z_k)\|^2}
+```
+
+being strictly positive — otherwise the target $w_k - \gamma\lambda_k F(z_k)$
+lies on the wrong side of the separating hyperplane $H_k$ and the
+geometry flips silently. Positivity follows whenever the line search
+enforces an Armijo-style separation
+
+```math
+-F(z_k)^\top d_k \;\ge\; \sigma\, \alpha_k\, \gamma_k\, \|d_k\|^2 \;>\; 0
+```
+
+which together with $z_k = w_k + \alpha_k d_k$ gives
+$F(z_k)^\top (w_k - z_k) = -\alpha_k F(z_k)^\top d_k > 0$. All three
+built-in line searches ([`ConstantBacktrack`](@ref),
+[`ResidualNormBacktrack`](@ref), [`AdaptiveClampedBacktrack`](@ref))
+enforce this. **Custom line searches that don't satisfy the separation
+will produce $\lambda_k \le 0$ silently** — there is no runtime check;
+debug by logging `λ` from inside a custom `update_iterate!` or by
+verifying the separation condition holds at acceptance.
 
 ### Custom iterate-update strategy
 
