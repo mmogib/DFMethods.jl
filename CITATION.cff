@@ -9,8 +9,8 @@ authors:
     orcid: "https://orcid.org/0000-0002-1367-646X"
     email: mshahrani@kfupm.edu.sa
     affiliation: "King Fahd University of Petroleum and Minerals"
-version: 0.3.1
-date-released: "2026-05-24"
+version: 0.3.2
+date-released: "2026-05-25"
 repository-code: "https://github.com/mmogib/DFMethods.jl"
 url: "https://mmogib.github.io/DFMethods.jl/stable/"
 license: MIT
