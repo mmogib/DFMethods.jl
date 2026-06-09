@@ -3,6 +3,14 @@ on:
   schedule:
     - cron: 0 0 * * *
   workflow_dispatch:
+# Least-privilege: scope this workflow's GITHUB_TOKEN to exactly what
+# CompatHelper needs (read the repo, open the compat PR) instead of the
+# repo-wide `write` default. PR *creation* is additionally gated by the
+# repo setting "Allow GitHub Actions to create and approve pull requests"
+# (Settings > Actions > General > Workflow permissions), enabled 2026-06-09.
+permissions:
+  contents: write
+  pull-requests: write
 jobs:
   CompatHelper:
     runs-on: ubuntu-latest
