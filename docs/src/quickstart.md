@@ -132,7 +132,7 @@ Custom observers subtype [`AbstractCallback`](@ref) and add a method on
 ```@example quick
 using SciMLBase            # for ReturnCode
 
-sol_short = solve(prob, DFProjection(); maxiters = 2)
+sol_short = solve(prob, DFProjection(); maxiters = 2, verbose = false)  # we expect (and inspect) a non-Success retcode
 sol_short.retcode == ReturnCode.MaxIters
 ```
 
