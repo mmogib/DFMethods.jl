@@ -1,7 +1,7 @@
 name = "DFMethods"
 uuid = "5fd0b45f-fdf3-4567-a8b1-5e033765ff5d"
-authors = ["Mohammed Alshahrani <mshahrani@kfupm.edu.sa>"]
 version = "0.3.2"
+authors = ["Mohammed Alshahrani <mshahrani@kfupm.edu.sa>"]
 
 [deps]
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
@@ -13,7 +13,7 @@ SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 [compat]
 CommonSolve = "0.2"
 LineSearch = "0.1"
-SciMLBase = "2.53"
+SciMLBase = "2.53, 3"
 julia = "1.10"
 
 [extras]
