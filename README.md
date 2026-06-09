@@ -1,6 +1,6 @@
 # DFMethods
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20350220.svg)](https://doi.org/10.5281/zenodo.20350220)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20350219.svg)](https://doi.org/10.5281/zenodo.20350219)
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mmogib.github.io/DFMethods.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mmogib.github.io/DFMethods.jl/dev/)
 [![Build Status](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/mmogib/DFMethods.jl/actions/workflows/CI.yml?query=branch%3Amain)
@@ -45,12 +45,12 @@ If you use DFMethods.jl in research, please cite it via the Zenodo DOI:
   year      = 2026,
   publisher = {Zenodo},
   version   = {v0.3.3},
-  doi       = {10.5281/zenodo.20350220},
-  url       = {https://doi.org/10.5281/zenodo.20350220}
+  doi       = {10.5281/zenodo.20350219},
+  url       = {https://doi.org/10.5281/zenodo.20350219}
 }
 ```
 
-The machine-readable equivalent is in [`CITATION.cff`](CITATION.cff) — GitHub's *Cite this repository* button uses this file. Each tagged release also has a version-specific Zenodo DOI; see the [GitHub Releases page](https://github.com/mmogib/DFMethods.jl/releases) or the [Zenodo record](https://doi.org/10.5281/zenodo.20350220).
+The machine-readable equivalent is in [`CITATION.cff`](CITATION.cff) — GitHub's *Cite this repository* button uses this file. Each tagged release also has a version-specific Zenodo DOI; see the [GitHub Releases page](https://github.com/mmogib/DFMethods.jl/releases) or the [Zenodo record](https://doi.org/10.5281/zenodo.20350219).
 
 If you build on a specific algorithmic component, please additionally cite the originating source — each component's docstring names it with a DOI link.
 
