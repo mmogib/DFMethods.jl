@@ -1141,6 +1141,115 @@ end
             @test alg.maxiters == 10                   # but unused by step!
         end
 
+        @testset "SciML common-solver keyword routing" begin
+            # Authoritative option list:
+            # https://docs.sciml.ai/NonlinearSolve/stable/basics/solve/
+
+            @testset "constructor reltol/maxtime build the default stopping" begin
+                a = DFProjection(; reltol = 1e-3)
+                @test a.reltol == 1e-3
+                @test a.auto_stopping
+                @test any(c isa RelResidualTol && c.rtol == 1e-3 for c in a.stopping.criteria)
+
+                b = DFProjection(; maxtime = 5.0)
+                @test b.maxtime == 5.0
+                @test any(c isa MaxTime && c.maxtime == 5.0 for c in b.stopping.criteria)
+
+                # Default omits both → stays AnyOf(AbsResidualTol, MaxIters).
+                d = DFProjection()
+                @test d.reltol == 0.0
+                @test d.maxtime == Inf
+                @test !any(c isa RelResidualTol for c in d.stopping.criteria)
+                @test !any(c isa MaxTime       for c in d.stopping.criteria)
+            end
+
+            @testset "solve keywords rebuild the effective stopping" begin
+                f(u, p) = copy(u)
+                prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+                base = DFProjection()
+
+                c1 = init(prob, base; reltol = 1e-3)
+                @test c1.inner.alg.reltol == 1e-3
+                @test any(c isa RelResidualTol && c.rtol == 1e-3
+                          for c in c1.inner.alg.stopping.criteria)
+
+                c2 = init(prob, base; maxtime = 2.0)
+                @test c2.inner.alg.maxtime == 2.0
+                @test any(c isa MaxTime && c.maxtime == 2.0
+                          for c in c2.inner.alg.stopping.criteria)
+
+                c3 = init(prob, base; abstol = 1e-9, maxiters = 321)
+                @test c3.inner.alg.abstol   == 1e-9
+                @test c3.inner.alg.maxiters == 321
+
+                # No tol kwargs → no rebuild (same alg object flows through).
+                @test init(prob, base).inner.alg === base
+            end
+
+            @testset "reltol drives convergence (behavioral)" begin
+                F2(u, p) = u .- p
+                x0 = [1.0, -1.0]; target = [0.3, -0.2]
+                prob = SciMLBase.NonlinearProblem(F2, x0, target)
+                alg  = DFProjection(; inertial = NoInertial())
+                # Absurdly tight abstol so only the relative test can stop us.
+                sol = solve(prob, alg; abstol = 1e-14, reltol = 1e-2, maxiters = 2000)
+                @test sol.retcode == SciMLBase.ReturnCode.Success
+                @test norm(sol.resid) <= 1e-2 * norm(x0 .- target) + 1e-12
+            end
+
+            @testset "maxtime stops the solve (behavioral)" begin
+                F4(u, p) = u .- sin.(u) .- 1.0
+                prob = SciMLBase.NonlinearProblem(F4, ones(20))
+                alg  = DFProjection(; inertial = NoInertial())
+                # Zero time budget → first :post_iter MaxTime check fires.
+                sol = solve(prob, alg; maxtime = 0.0, abstol = 1e-12, verbose = false)
+                @test sol.retcode == SciMLBase.ReturnCode.Terminated
+            end
+
+            @testset "all standard SciML kwargs absorbed without error" begin
+                f(u, p) = copy(u)
+                prob = SciMLBase.NonlinearProblem(f, [0.5, 0.5])
+                sol = solve(prob, DFProjection(; maxiters = 200);
+                            termination_condition = nothing,
+                            internalnorm          = norm,
+                            alias_u0              = false,
+                            show_trace            = Val(false),
+                            store_trace           = Val(false),
+                            trace_level           = nothing)
+                @test sol isa SciMLBase.AbstractNonlinearSolution
+            end
+
+            @testset "verbose toggles the non-convergence warning" begin
+                # Nonlinear F (not solved in a single projection step) so
+                # maxiters=1 yields a genuine non-Success MaxIters exit.
+                F5(u, p) = u .- sin.(u) .- 1.0
+                prob = SciMLBase.NonlinearProblem(F5, ones(8))
+                alg  = DFProjection(; maxiters = 1)
+
+                @test init(prob, alg; verbose = false).verbose == false
+                @test init(prob, alg).verbose == true
+
+                # Default verbose=true → a non-Success exit warns.
+                sol = @test_logs (:warn,) match_mode = :any solve(prob, alg)
+                @test sol.retcode != SciMLBase.ReturnCode.Success
+                # verbose=false → no warn-level log.
+                @test_logs match_mode = :all min_level = Base.CoreLogging.Warn solve(prob, alg; verbose = false)
+            end
+
+            @testset "custom stopping + tol override warns, preserves rule" begin
+                f(u, p) = copy(u)
+                prob = SciMLBase.NonlinearProblem(f, [1.0, 1.0])
+                custom = AnyOf(AbsResidualTol(1e-4), MaxIters(50))
+                alg = DFProjection(; stopping = custom)
+                @test !alg.auto_stopping
+
+                c = @test_logs (:warn,) match_mode = :any init(prob, alg; reltol = 1e-3)
+                @test c.inner.alg.stopping === custom    # custom rule preserved
+                # verbose=false silences the conflict warning.
+                @test_logs match_mode = :all min_level = Base.CoreLogging.Warn init(prob, alg; reltol = 1e-3, verbose = false)
+            end
+        end
+
         @testset "end-to-end: RelResidualTol converges" begin
             F2(u, p) = u .- p
             target = [0.3, -0.2]

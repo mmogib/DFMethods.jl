@@ -7,8 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Full SciML common-solver keyword support in `solve` / `init`.**
+  `DFProjection` now honors the standard SciMLBase nonlinear-solve
+  keywords that map onto its callback-based stopping system (previously
+  only `abstol` and `maxiters` were honored; `reltol` and others were
+  silently ignored):
+  - `reltol` → `RelResidualTol` (`‖F(z_k)‖ ≤ reltol·‖F(x_0)‖`). New
+    `DFProjection` field `reltol::Float64 = 0.0` (`0` disables).
+  - `maxtime` → `MaxTime` (wall-clock seconds). New `DFProjection` field
+    `maxtime::Float64 = Inf` (`Inf` / `nothing` disables).
+  - `abstol` → `AbsResidualTol`, `maxiters` → `MaxIters` (unchanged).
+  Each defaults to the matching `DFProjection` field and is overridden
+  per-`solve`. All other standard keywords (`termination_condition`,
+  `internalnorm`, `alias_u0`, `show_trace`, `store_trace`, `trace_level`)
+  are accepted and absorbed without error, so
+  `solve(prob, ::DFProjection; any_standard_kwarg…)` never throws. The
+  default stopping rule is unchanged for code that doesn't set `reltol` /
+  `maxtime` (still `AnyOf(AbsResidualTol(abstol), MaxIters(maxiters))`).
+
 ### Changed
 
+- **`solve` warns on non-convergence (SciML convention).** A non-`Success`
+  (early) exit now emits a warning unless `verbose = false` is passed.
+  Earlier releases never warned; solver results are unchanged — only
+  diagnostic output differs.
 - **`SciMLBase` compatibility widened to allow 3.x** — `[compat]` bound
   `SciMLBase = "2.53"` → `"2.53, 3"`. The package's SciMLBase surface is
   limited to stable API (`NonlinearProblem`, `isinplace`, `ReturnCode`,

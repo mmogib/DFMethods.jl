@@ -112,16 +112,44 @@ end
 # Effective algorithm with SciML kwarg overrides
 # ============================================================================
 
-function _alg_with_overrides(alg::DFProjection, abstol::Real, maxiters::Int)
-    if abstol == alg.abstol && maxiters == alg.maxiters
+function _alg_with_overrides(alg::DFProjection, abstol::Real, reltol::Real,
+                             maxiters::Integer, maxtime::Real; verbose::Bool = true)
+    if abstol == alg.abstol && reltol == alg.reltol &&
+       maxiters == alg.maxiters && maxtime == alg.maxtime
         return alg
     end
+    if !alg.auto_stopping
+        # The user supplied an explicit `stopping` rule; it governs
+        # termination. Folding tolerance overrides into it would silently
+        # override the user's intent, so keep the rule as-is and warn.
+        verbose && @warn("DFProjection: a custom `stopping` criterion is set, so the " *
+                         "solve-time tolerance/budget keyword(s) are ignored. " *
+                         "Encode tolerances directly in the `stopping` rule.")
+        return DFProjection(;
+            direction      = alg.direction,
+            linesearch     = alg.linesearch,
+            inertial       = alg.inertial,
+            abstol         = Float64(abstol),
+            reltol         = Float64(reltol),
+            maxiters       = Int(maxiters),
+            maxtime        = Float64(maxtime),
+            stopping       = alg.stopping,          # preserve the custom rule
+            ζ              = alg.ζ,
+            inner_maxiter  = alg.inner_maxiter,
+            maxbt          = alg.maxbt,
+            iterate_update = alg.iterate_update,
+            callbacks      = alg.callbacks,
+        )
+    end
+    # Default knob-built stopping: rebuild it from the overridden knobs.
     return DFProjection(;
         direction      = alg.direction,
         linesearch     = alg.linesearch,
         inertial       = alg.inertial,
         abstol         = Float64(abstol),
-        maxiters       = maxiters,
+        reltol         = Float64(reltol),
+        maxiters       = Int(maxiters),
+        maxtime        = Float64(maxtime),
         ζ              = alg.ζ,
         inner_maxiter  = alg.inner_maxiter,
         maxbt          = alg.maxbt,
@@ -138,14 +166,17 @@ end
     DFSciMLCache
 
 Wrapper cache returned by `CommonSolve.init(prob, alg; …)`. Carries
-the original `NonlinearProblem`, the user-facing algorithm, and the
-inner Phase 2 `DFProjectionCache`. `CommonSolve.solve!` drives the inner
-cache to termination and packages the result as a `NonlinearSolution`.
+the original `NonlinearProblem`, the user-facing algorithm, the inner
+Phase 2 `DFProjectionCache`, and the resolved `verbose` flag (used by
+`solve!` to decide whether to warn on a non-`Success` exit).
+`CommonSolve.solve!` drives the inner cache to termination and packages
+the result as a `NonlinearSolution`.
 """
 mutable struct DFSciMLCache{Prob, Alg<:DFProjection, Inner<:DFProjectionCache}
     prob::Prob
     alg::Alg
     inner::Inner
+    verbose::Bool
 end
 
 # ============================================================================
@@ -153,28 +184,65 @@ end
 # ============================================================================
 
 """
-    CommonSolve.init(prob::NonlinearProblem, alg::DFProjection; abstol, maxiters, kwargs...)
+    CommonSolve.init(prob::NonlinearProblem, alg::DFProjection;
+                     abstol, reltol, maxiters, maxtime, verbose, kwargs...)
         -> DFSciMLCache
 
-Build a cache for `solve(prob, alg; …)`. Accepts SciML's standard
-`abstol` and `maxiters` kwargs (overriding `alg.abstol` / `alg.maxiters`);
-other kwargs are absorbed without effect (Phase 3 polish: route
-`verbose`, `callback`, etc.).
+Build a cache for `solve(prob, alg; …)`. Honors the SciML common-solver
+options that map onto DFMethods' callback-based stopping system:
+
+- `abstol`   → `AbsResidualTol(abstol)`
+- `reltol`   → `RelResidualTol(reltol)`  (target `‖F(z_k)‖ ≤ reltol·‖F(x_0)‖`)
+- `maxiters` → `MaxIters(maxiters)`
+- `maxtime`  → `MaxTime(maxtime)` seconds (`nothing` ⇒ no limit)
+- `verbose`  → toggles the non-convergence warning emitted by `solve!`
+
+Each defaults to the matching field on `alg`; any that is supplied
+overrides it by rebuilding the default stopping rule. If `alg` was built
+with an explicit `stopping=`, these tolerance keywords cannot be applied
+and (when `verbose`) a warning is emitted.
+
+All other SciML common-solver keywords — `termination_condition`,
+`internalnorm`, `alias_u0`, `show_trace`, `store_trace`, `trace_level` —
+are accepted and absorbed without error. DFMethods uses its own
+callback-based termination and the Euclidean residual norm, so
+`solve(prob, ::DFProjection; any_standard_kwarg…)` never throws.
 """
 function CommonSolve.init(prob::Union{SciMLBase.NonlinearProblem,
                                        ConstrainedNonlinearProblem},
                           alg::DFProjection;
-                          abstol::Real  = alg.abstol,
-                          maxiters::Int = alg.maxiters,
+                          abstol   = nothing,
+                          reltol   = nothing,
+                          maxiters = nothing,
+                          maxtime  = nothing,
+                          verbose  = true,
                           kwargs...)
-    F       = _wrap_problem_F(prob)
+    F   = _wrap_problem_F(prob)
     # Preserve eltype of u0; init_cache derives T from this (with Int → Float64
     # fallback). The foundational change for end-to-end T-genericity in v0.3.0.
-    x0      = collect(_problem_u0(prob))
-    set     = _constraint_set(prob)
-    alg_eff = _alg_with_overrides(alg, abstol, maxiters)
-    inner   = init_cache(F, x0, alg_eff; set = set)
-    return DFSciMLCache(prob, alg, inner)
+    x0  = collect(_problem_u0(prob))
+    set = _constraint_set(prob)
+
+    # Resolve effective SciML common-solver options. A `nothing` sentinel
+    # means "not supplied by the caller" → fall back to the algorithm's
+    # stored value. `maxtime === nothing` doubles as SciML's "no time limit".
+    eff_abstol   = abstol   === nothing ? alg.abstol   : Float64(abstol)
+    eff_reltol   = reltol   === nothing ? alg.reltol   : Float64(reltol)
+    eff_maxiters = maxiters === nothing ? alg.maxiters : Int(maxiters)
+    eff_maxtime  = maxtime  === nothing ? alg.maxtime  : Float64(maxtime)
+    # `verbose` is a Bool in the common interface; tolerate (and ignore)
+    # any other type a native-solver caller might pass, never throwing.
+    vflag        = verbose isa Bool ? verbose : true
+
+    any_override = !(abstol === nothing && reltol === nothing &&
+                     maxiters === nothing && maxtime === nothing)
+    alg_eff = any_override ?
+        _alg_with_overrides(alg, eff_abstol, eff_reltol, eff_maxiters, eff_maxtime;
+                            verbose = vflag) :
+        alg
+
+    inner = init_cache(F, x0, alg_eff; set = set)
+    return DFSciMLCache(prob, alg, inner, vflag)
 end
 
 # ============================================================================
@@ -203,14 +271,26 @@ function CommonSolve.solve!(cache::DFSciMLCache)
         inner.resid    = sqrt(s)
         inner.n_evals += 1
     end
-    # Fire :terminate (observers see final state; stopping criteria ignore).
-    _fire!(inner, cache.alg, :terminate)
+    # Fire :terminate on the *effective* algorithm — `inner.alg` already
+    # carries any solve-time overrides (observers see the final state;
+    # stopping criteria no-op at :terminate).
+    _fire!(inner, inner.alg, :terminate)
 
     resid_vec = inner.F(inner.x)
-    stats = SciMLBase.NLStats(inner.n_evals + 1, 0, 0, 0, inner.k)
+    retcode   = _to_sciml_retcode(inner.retcode)
+    stats     = SciMLBase.NLStats(inner.n_evals + 1, 0, 0, 0, inner.k)
+
+    # SciML convention: warn on a non-`Success` (early) exit unless the
+    # caller passed `verbose = false`. The residual is included so a
+    # near-zero degenerate exit is self-evidently benign to the reader.
+    if cache.verbose && retcode !== SciMLBase.ReturnCode.Success
+        @warn("DFProjection did not converge to the requested tolerance.",
+              retcode = inner.retcode, residual = inner.resid, iterations = inner.k)
+    end
+
     return SciMLBase.build_solution(_inner_problem(cache.prob), cache.alg,
                                     inner.x, resid_vec;
-                                    retcode = _to_sciml_retcode(inner.retcode),
+                                    retcode = retcode,
                                     stats   = stats)
 end
 
