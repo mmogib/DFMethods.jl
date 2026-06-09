@@ -1,7 +1,7 @@
 name = "DFMethods"
 uuid = "5fd0b45f-fdf3-4567-a8b1-5e033765ff5d"
 authors = ["Mohammed Alshahrani <mshahrani@kfupm.edu.sa>"]
-version = "0.3.2"
+version = "0.3.3"
 
 [deps]
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
