@@ -161,7 +161,7 @@ alg_capped = DFProjection(;
                      MaxIters(10_000),
                      MaxTime(0.05)),       # 50 ms
 )
-wall = @elapsed sol = solve(prob, alg_capped)
+wall = @elapsed sol = solve(prob, alg_capped; verbose = false)  # MaxTime is the expected exit here
 (retcode = sol.retcode, iters = sol.stats.nsteps,
  wallclock_seconds = round(wall; digits = 3))
 ```
@@ -260,7 +260,7 @@ for (pname, n_p, F_p) in problems
     x0_p = ones(n_p)
     for (lname, ls) in line_searches
         sol = solve(NonlinearProblem(F_p, x0_p),
-                    DFProjection(; linesearch = ls))
+                    DFProjection(; linesearch = ls); verbose = false)  # some configs may not converge; we record it
         push!(results, (
             problem    = pname,
             linesearch = lname,

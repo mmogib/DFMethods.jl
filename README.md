@@ -41,10 +41,10 @@ If you use DFMethods.jl in research, please cite it via the Zenodo DOI:
 @software{Alshahrani_DFMethods_2026,
   author    = {Alshahrani, Mohammed},
   title     = {{DFMethods.jl: A configurable framework for derivative-free projection methods for constrained nonlinear equations}},
-  month     = may,
+  month     = jun,
   year      = 2026,
   publisher = {Zenodo},
-  version   = {v0.3.2},
+  version   = {v0.3.3},
   doi       = {10.5281/zenodo.20350220},
   url       = {https://doi.org/10.5281/zenodo.20350220}
 }

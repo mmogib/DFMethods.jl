@@ -5,6 +5,49 @@ All notable changes to **DFMethods.jl** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] — 2026-06-09
+
+### Added
+
+- **Full SciML common-solver keyword support in `solve` / `init`.**
+  `DFProjection` now honors the standard SciMLBase nonlinear-solve
+  keywords that map onto its callback-based stopping system (previously
+  only `abstol` and `maxiters` were honored; `reltol` and others were
+  silently ignored):
+  - `reltol` → `RelResidualTol` (`‖F(z_k)‖ ≤ reltol·‖F(x_0)‖`). New
+    `DFProjection` field `reltol::Float64 = 0.0` (`0` disables).
+  - `maxtime` → `MaxTime` (wall-clock seconds). New `DFProjection` field
+    `maxtime::Float64 = Inf` (`Inf` / `nothing` disables).
+  - `abstol` → `AbsResidualTol`, `maxiters` → `MaxIters` (unchanged).
+  Each defaults to the matching `DFProjection` field and is overridden
+  per-`solve`. All other standard keywords (`termination_condition`,
+  `internalnorm`, `alias_u0`, `show_trace`, `store_trace`, `trace_level`)
+  are accepted and absorbed without error, so
+  `solve(prob, ::DFProjection; any_standard_kwarg…)` never throws. The
+  default stopping rule is unchanged for code that doesn't set `reltol` /
+  `maxtime` (still `AnyOf(AbsResidualTol(abstol), MaxIters(maxiters))`).
+
+### Changed
+
+- **`solve` warns on non-convergence (SciML convention).** A non-`Success`
+  (early) exit now emits a warning unless `verbose = false` is passed.
+  Earlier releases never warned; solver results are unchanged — only
+  diagnostic output differs.
+- **`SciMLBase` compatibility widened to allow 3.x** — `[compat]` bound
+  `SciMLBase = "2.53"` → `"2.53, 3"`. The package's SciMLBase surface is
+  limited to stable API (`NonlinearProblem`, `isinplace`, `ReturnCode`,
+  `NLStats`, `build_solution`, `__solve`) and is unaffected by the
+  2.x → 3.x major bump; the full test suite plus docs build pass against
+  SciMLBase 3.x across Julia 1.10 / 1.12 / pre on x64 + x86. The v2.x
+  range is retained, so this is a drop-in widening for existing v0.3.2
+  user code.
+
+### Compatibility
+
+- Julia ≥ 1.10 (unchanged).
+- `SciMLBase` v2.53+ **or** v3.x (widened this cycle; previously v2.x only).
+- `CommonSolve` v0.2.x, `LineSearch` v0.1.x (unchanged).
+
 ## [0.3.2] — 2026-05-25
 
 ### Added
@@ -360,6 +403,7 @@ for constrained nonlinear equations $F(x) = 0$ on a closed convex set $X$.
 - `SciMLBase` v2.x
 - `CommonSolve` v0.2.x
 
+[0.3.3]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.3
 [0.3.2]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.2
 [0.3.1]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.1
 [0.3.0]: https://github.com/mmogib/DFMethods.jl/releases/tag/v0.3.0

@@ -18,8 +18,8 @@
 
 """
     DFProjection(; direction, linesearch, inertial, iterate_update,
-                   abstol, maxiters, stopping, ζ, inner_maxiter, maxbt,
-                   callbacks)
+                   abstol, reltol, maxiters, maxtime, stopping, ζ,
+                   inner_maxiter, maxbt, callbacks)
 
 Concrete derivative-free projection algorithm with pluggable components.
 The constraint set lives on the **problem**, not on the algorithm — see
@@ -31,21 +31,26 @@ The constraint set lives on the **problem**, not on the algorithm — see
 - `linesearch::LineSearch.AbstractLineSearchAlgorithm` — line search. Default: `ResidualNormBacktrack()`.
 - `inertial::AbstractInertialRule`     — inertial rule. Default: `Inertial(0.25)`.
 - `iterate_update::AbstractIterateUpdate` — post-line-search iterate update strategy. Default: `SolodovSvaiterProjection()`. Alternatives: `DirectUpdate()`, `HalpernUpdate(β)`.
-- `abstol::Float64`                    — residual tolerance used to build the default stopping. Default: `1e-6`.
+- `abstol::Float64`                    — absolute residual tolerance used to build the default stopping. Default: `1e-6`.
+- `reltol::Float64`                    — relative residual tolerance (target `‖F(z_k)‖ ≤ reltol·‖F(x_0)‖`) used to build the default stopping. `0` disables it. Default: `0.0`.
 - `maxiters::Int`                      — outer-iteration cap used to build the default stopping. Default: `2000`.
-- `stopping::AbstractStoppingCriterion` — full stopping rule. If not supplied, built as `AnyOf(AbsResidualTol(abstol), MaxIters(maxiters))`.
+- `maxtime::Float64`                   — wall-clock budget in seconds used to build the default stopping. `Inf` disables it. Default: `Inf`.
+- `stopping::AbstractStoppingCriterion` — full stopping rule. If not supplied, built from the knobs above as `AnyOf(AbsResidualTol(abstol)[, RelResidualTol(reltol)], MaxIters(maxiters)[, MaxTime(maxtime)])` — the bracketed criteria appear only when `reltol > 0` / `maxtime` is finite.
 - `ζ::Float64`                         — approximate-projection tolerance factor used by `SolodovSvaiterProjection`. Default: `0.5`.
 - `inner_maxiter::Int`                 — max inner-projection iterations (Dykstra). Default: `500`.
 - `maxbt::Int`                         — max line-search backtracks per iteration. Default: `50`.
 - `callbacks::Vector{<:AbstractCallback}` — observer callbacks fired during the solve. Default: empty.
 
 # Stopping criteria
-`abstol` and `maxiters` are convenience knobs that build the default
-stopping rule. For composite or domain-specific criteria, pass
-`stopping = AnyOf(RelResidualTol(...), StepNormTol(...), MaxTime(...), …)`;
-the `abstol`/`maxiters` fields are still stored (for introspection and
-SciMLBase kwarg overrides) but `step!` ignores them in favour of the
-supplied `stopping`.
+`abstol`, `reltol`, `maxiters`, and `maxtime` are convenience knobs that
+build the default stopping rule (mirroring the SciML common-solver
+options of the same name). For composite or domain-specific criteria,
+pass `stopping = AnyOf(StepNormTol(...), DirectionNormTol(...), …)`; the
+knob fields are still stored (for introspection and SciMLBase kwarg
+overrides) but `step!` ignores them in favour of the supplied `stopping`.
+When a `stopping` rule is supplied explicitly, `solve`-time tolerance
+keywords (`abstol`/`reltol`/`maxiters`/`maxtime`) cannot be re-applied and
+are reported via a `verbose` warning.
 """
 struct DFProjection{Dir<:AbstractSearchDirection,
                     LS<:LineSearch.AbstractLineSearchAlgorithm,
@@ -57,8 +62,11 @@ struct DFProjection{Dir<:AbstractSearchDirection,
     linesearch::LS
     inertial::In
     abstol::Float64
+    reltol::Float64
     maxiters::Int
+    maxtime::Float64
     stopping::Stop
+    auto_stopping::Bool
     ζ::Float64
     inner_maxiter::Int
     maxbt::Int
@@ -71,7 +79,9 @@ function DFProjection(;
         linesearch = ResidualNormBacktrack(),
         inertial   = Inertial(0.25),
         abstol::Real     = 1e-6,
+        reltol::Real     = 0.0,
         maxiters::Int    = 2000,
+        maxtime::Real    = Inf,
         stopping::Union{Nothing, AbstractStoppingCriterion} = nothing,
         ζ::Real          = 0.5,
         inner_maxiter::Int = 500,
@@ -79,13 +89,36 @@ function DFProjection(;
         iterate_update = SolodovSvaiterProjection(),
         callbacks::Vector{<:AbstractCallback} = AbstractCallback[],
     )
-    stop = stopping === nothing ?
-        AnyOf(AbsResidualTol(Float64(abstol)), MaxIters(maxiters)) :
-        stopping
+    auto = stopping === nothing
+    stop = auto ? _default_stopping(abstol, reltol, maxiters, maxtime) : stopping
     return DFProjection(direction, linesearch, inertial,
-                        Float64(abstol), maxiters, stop,
+                        Float64(abstol), Float64(reltol), maxiters, Float64(maxtime),
+                        stop, auto,
                         Float64(ζ), inner_maxiter, maxbt,
                         iterate_update, callbacks)
+end
+
+# Build the default stopping rule from the convenience tolerance/budget
+# knobs. `RelResidualTol` is added only when `reltol > 0` and `MaxTime`
+# only when `maxtime` is finite, so the common cases `DFProjection()` and
+# `DFProjection(; abstol, maxiters)` produce exactly
+# `AnyOf(AbsResidualTol(abstol), MaxIters(maxiters))` — byte-identical to
+# earlier releases (no behavior change for code that doesn't set reltol /
+# maxtime).
+function _default_stopping(abstol::Real, reltol::Real, maxiters::Integer, maxtime::Real)
+    abs_c  = AbsResidualTol(Float64(abstol))
+    iter_c = MaxIters(Int(maxiters))
+    use_rel  = reltol > 0
+    use_time = isfinite(maxtime)
+    if use_rel && use_time
+        return AnyOf(abs_c, RelResidualTol(Float64(reltol)), iter_c, MaxTime(Float64(maxtime)))
+    elseif use_rel
+        return AnyOf(abs_c, RelResidualTol(Float64(reltol)), iter_c)
+    elseif use_time
+        return AnyOf(abs_c, iter_c, MaxTime(Float64(maxtime)))
+    else
+        return AnyOf(abs_c, iter_c)
+    end
 end
 
 # ============================================================================
