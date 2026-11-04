@@ -15,6 +15,11 @@ jobs:
   CompatHelper:
     runs-on: ubuntu-latest
     steps:
+      # ubuntu-latest no longer ships Julia preinstalled; the `shell: julia`
+      # steps below fail with "julia: command not found" without this.
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
       - name: Install CompatHelper
         run: using Pkg; Pkg.add("CompatHelper")
         shell: julia --color=yes {0}
